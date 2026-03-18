@@ -3,7 +3,7 @@
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
-<title>Controle de Cartão</title>
+<title>SCPC - Sistema de Controle de Pagamentos com Cartão</title>
 <script src="https://www.gstatic.com/firebasejs/10.8.0/firebase-app-compat.js"></script>
 <script src="https://www.gstatic.com/firebasejs/10.8.0/firebase-auth-compat.js"></script>
 <script src="https://www.gstatic.com/firebasejs/10.8.0/firebase-firestore-compat.js"></script>
@@ -85,7 +85,7 @@ async function ld(){
           // Merge seed baixas for missing months
           const bx=baixas||{};
           Object.keys(SEED_BX).forEach(m=>{if(!bx[m])bx[m]=SEED_BX[m];});
-          return{purchases,people:people||{},baixas:bx};
+          return{purchases,people:people||{},baixas:bx,updatedAt:d.updatedAt||null};
         }
       }
     }
@@ -120,7 +120,7 @@ const Z={bg:"#080810",cd:"#0e0e1a",cd2:"#13131f",bd:"#1c1c30",bd2:"#262640",tx:"
 
 function App(){
   const[user,setUser]=useState(null);const[role,setRole]=useState(null);const[authLoading,setAuthLoading]=useState(true);const[authError,setAuthError]=useState(null);
-  const[ps,setPs]=useState([]);const[ppl,setPpl]=useState({});const[baixas,setBaixas]=useState({});const[ok,setOk]=useState(false);const[saving,setSaving]=useState(false);
+  const[ps,setPs]=useState([]);const[ppl,setPpl]=useState({});const[baixas,setBaixas]=useState({});const[ok,setOk]=useState(false);const[saving,setSaving]=useState(false);const[lastUpdate,setLastUpdate]=useState(null);
   const[tab,setTab]=useState("dashboard");const[sm,setSm]=useState(cmk());const[sf,setSf]=useState(false);const[ep,setEp]=useState(null);const[sr,setSr]=useState("");const[toast,setToast]=useState(null);
   const isAdmin=role==="admin";
 
@@ -145,10 +145,10 @@ function App(){
   },[]);
 
   // Load data after auth
-  useEffect(()=>{if(!user||!role)return;(async()=>{const d=await ld();if(d?.purchases){setPs(d.purchases);setPpl(d.people||{});setBaixas(d.baixas||{});}else{setPs(SEED_P);setPpl(SEED_PPL);setBaixas(SEED_BX);if(isAdmin)await sv({purchases:SEED_P,people:SEED_PPL,baixas:SEED_BX});}setOk(true);})();},[user,role]);
+  useEffect(()=>{if(!user||!role)return;(async()=>{const d=await ld();if(d?.purchases){setPs(d.purchases);setPpl(d.people||{});setBaixas(d.baixas||{});if(d.updatedAt)setLastUpdate(d.updatedAt);}else{setPs(SEED_P);setPpl(SEED_PPL);setBaixas(SEED_BX);if(isAdmin)await sv({purchases:SEED_P,people:SEED_PPL,baixas:SEED_BX});}setOk(true);})();},[user,role]);
 
   const tr=useRef(null);
-  useEffect(()=>{if(!ok||!isAdmin)return;if(tr.current)clearTimeout(tr.current);tr.current=setTimeout(async()=>{setSaving(true);const ok2=await sv({purchases:ps,people:ppl,baixas});setSaving(false);tt(ok2?"Salvo no Firebase ☁":"Salvo localmente");},.8e3);},[ps,ppl,baixas,ok]);
+  useEffect(()=>{if(!ok||!isAdmin)return;if(tr.current)clearTimeout(tr.current);tr.current=setTimeout(async()=>{setSaving(true);const now=new Date().toISOString();const ok2=await sv({purchases:ps,people:ppl,baixas});setSaving(false);if(ok2)setLastUpdate(now);tt(ok2?"Salvo no Firebase ☁":"Salvo localmente");},.8e3);},[ps,ppl,baixas,ok]);
   const tt=(m)=>{setToast(m);setTimeout(()=>setToast(null),2e3);};
   const am=useMemo(()=>{const s=new Set(MO);ps.forEach(p=>Object.keys(p.monthly).forEach(m=>s.add(m)));return MO.filter(m=>s.has(m));},[ps]);
   const mt=useMemo(()=>{const t={};am.forEach(m=>{t[m]=0;});ps.forEach(p=>Object.entries(p.monthly).forEach(([m,v])=>{t[m]=(t[m]||0)+v;}));return t;},[ps,am]);
@@ -225,6 +225,11 @@ function App(){
     <nav style={{display:"flex",gap:1,padding:"0 18px",background:Z.cd,borderBottom:`1px solid ${Z.bd}`,overflowX:"auto",WebkitOverflowScrolling:"touch"}}>
       {[["dashboard","Dashboard"],["purchases","Compras"],["baixas","Baixas"],/*["people","Terceiros"],*/["reports","Relatórios"]].map(([id,lb])=>(<button key={id} onClick={()=>setTab(id)} style={{background:tab===id?Z.cd2:"transparent",color:tab===id?Z.ac:Z.tx2,border:"none",borderBottom:tab===id?`2px solid ${Z.ac2}`:"2px solid transparent",padding:"10px 13px",fontSize:11,fontWeight:500,cursor:"pointer"}}>{lb}</button>))}
     </nav>
+
+    <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",padding:"6px 18px",background:Z.bg,borderBottom:`1px solid ${Z.bd}`,fontSize:10,color:Z.tx3,flexWrap:"wrap",gap:4}}>
+      <span>Fechamento da fatura: <span style={{color:Z.yl,fontWeight:600}}>dia 19 de cada mês</span></span>
+      <span>Última atualização: <span style={{color:Z.ac,fontFamily:Z.mn}}>{lastUpdate?new Date(lastUpdate).toLocaleString("pt-BR",{day:"2-digit",month:"2-digit",year:"numeric",hour:"2-digit",minute:"2-digit"}):"—"}</span></span>
+    </div>
 
     <main style={{padding:18,maxWidth:1100,margin:"0 auto",animation:"fi .25s ease"}}>
       {tab==="dashboard"&&<Dash {...{mt,sm,setSm,cmp,td,ap,am,ps,baixas,setBaixas,isAdmin}}/>}
