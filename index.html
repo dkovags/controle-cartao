@@ -1,9 +1,6 @@
 <!DOCTYPE html>
 <html lang="pt-BR">
 <head>
-<meta charset="UTF-8"><!DOCTYPE html>
-<html lang="pt-BR">
-<head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
 <title>Controle de Cartão</title>
@@ -226,14 +223,14 @@ function App(){
     </header>
 
     <nav style={{display:"flex",gap:1,padding:"0 18px",background:Z.cd,borderBottom:`1px solid ${Z.bd}`,overflowX:"auto",WebkitOverflowScrolling:"touch"}}>
-      {[["dashboard","Dashboard"],["purchases","Compras"],["baixas","Baixas"],["people","Terceiros"],["reports","Relatórios"]].map(([id,lb])=>(<button key={id} onClick={()=>setTab(id)} style={{background:tab===id?Z.cd2:"transparent",color:tab===id?Z.ac:Z.tx2,border:"none",borderBottom:tab===id?`2px solid ${Z.ac2}`:"2px solid transparent",padding:"10px 13px",fontSize:11,fontWeight:500,cursor:"pointer"}}>{lb}</button>))}
+      {[["dashboard","Dashboard"],["purchases","Compras"],["baixas","Baixas"],/*["people","Terceiros"],*/["reports","Relatórios"]].map(([id,lb])=>(<button key={id} onClick={()=>setTab(id)} style={{background:tab===id?Z.cd2:"transparent",color:tab===id?Z.ac:Z.tx2,border:"none",borderBottom:tab===id?`2px solid ${Z.ac2}`:"2px solid transparent",padding:"10px 13px",fontSize:11,fontWeight:500,cursor:"pointer"}}>{lb}</button>))}
     </nav>
 
     <main style={{padding:18,maxWidth:1100,margin:"0 auto",animation:"fi .25s ease"}}>
       {tab==="dashboard"&&<Dash {...{mt,sm,setSm,cmp,td,ap,am,ps,baixas,setBaixas,isAdmin}}/>}
       {tab==="purchases"&&<Purch {...{ps,setPs,sr,setSr,setEp,isAdmin}}/>}
       {tab==="baixas"&&<BaixasView {...{baixas,setBaixas,mt,am,isAdmin}}/>}
-      {tab==="people"&&<Ppl ppl={ppl} setPpl={setPpl} isAdmin={isAdmin}/>}
+      {/*tab==="people"&&<Ppl ppl={ppl} setPpl={setPpl} isAdmin={isAdmin}/>*/}
       {tab==="reports"&&<Rpts {...{ps,mt,am}}/>}
     </main>
 
@@ -393,16 +390,15 @@ function Purch({ps,setPs,sr,setSr,setEp,isAdmin}){
         <div style={{flex:1,minWidth:0}}>
           <div style={{display:"flex",justifyContent:"space-between",alignItems:"baseline"}}><span style={{fontSize:12,fontWeight:600}}>{p.loja}</span><span style={{fontSize:12,fontWeight:700,fontFamily:Z.mn,color:Z.ac}}>{fB(p.total)}</span></div>
           <div style={{display:"flex",justifyContent:"space-between",marginTop:2}}><span style={{fontSize:9,color:Z.tx3}}>{fD(p.data)} · {fB(p.total/p.parcelas)}/mês</span><span style={{fontSize:9,color:pr>=100?Z.gn:Z.yl,fontWeight:600}}>{curParc}/{p.parcelas}</span></div>
-          <div style={{display:"flex",gap:6,marginTop:5,alignItems:"center"}}>
-            <div style={{flex:1}}>
-              <div style={{display:"flex",justifyContent:"space-between",marginBottom:2}}><span style={{fontSize:7,color:Z.tx3}}>Parcelas</span><span style={{fontSize:7,color:Z.tx3}}>{Math.round(pr)}%</span></div>
-              <div style={{height:3,background:Z.bd,borderRadius:2}}><div style={{height:"100%",background:pr>=100?Z.gn:`linear-gradient(90deg,${Z.ac3},${Z.ac2})`,borderRadius:2,width:`${pr}%`,transition:"width .3s"}}/></div>
-            </div>
-            <div style={{flex:1}}>
-              <div style={{display:"flex",justifyContent:"space-between",marginBottom:2}}><span style={{fontSize:7,color:Z.tx3}}>Valor</span><span style={{fontSize:7,color:Z.tx3}}>{fB(paidVal)} / {fB(p.total)}</span></div>
-              <div style={{height:3,background:Z.bd,borderRadius:2}}><div style={{height:"100%",background:prVal>=100?"#2dd4bf":`linear-gradient(90deg,#0d9488,#2dd4bf)`,borderRadius:2,width:`${prVal}%`,transition:"width .3s"}}/></div>
-            </div>
+          <div style={{display:"flex",gap:2,marginTop:5}}>
+            {Array.from({length:p.parcelas},(_,idx)=>{const paid=idx<pastCount;const current=idx===pastCount;return(<div key={idx} style={{flex:1,height:4,borderRadius:2,background:paid?Z.gn:current?Z.ac2:Z.bd,transition:"background .3s"}}/>);})}
           </div>
+          {/* Barra de valor (oculta)
+          <div style={{marginTop:4}}>
+            <div style={{display:"flex",justifyContent:"space-between",marginBottom:2}}><span style={{fontSize:7,color:Z.tx3}}>Valor</span><span style={{fontSize:7,color:Z.tx3}}>{fB(paidVal)} / {fB(p.total)}</span></div>
+            <div style={{height:3,background:Z.bd,borderRadius:2}}><div style={{height:"100%",background:prVal>=100?"#2dd4bf":`linear-gradient(90deg,#0d9488,#2dd4bf)`,borderRadius:2,width:`${prVal}%`,transition:"width .3s"}}/></div>
+          </div>
+          */}
         </div>
         <span style={{transform:ie?"rotate(180deg)":"rotate(0)",transition:"transform .2s",color:Z.tx3,fontSize:10}}>▼</span>
       </div>
