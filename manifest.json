@@ -2,8 +2,7 @@
   "name": "SCPC - Sistema de Controle de Pagamentos com Cartão",
   "short_name": "SCPC",
   "description": "Sistema de Controle de Pagamentos com Cartão",
-  "start_url": "/controle-cartao/",
-  "scope": "/controle-cartao/",
+  "start_url": ".",
   "display": "standalone",
   "background_color": "#080810",
   "theme_color": "#7c3aed",
@@ -13,13 +12,13 @@
       "src": "icon-192.png",
       "sizes": "192x192",
       "type": "image/png",
-      "purpose": "any maskable"
+      "purpose": "any"
     },
     {
       "src": "icon-512.png",
       "sizes": "512x512",
       "type": "image/png",
-      "purpose": "any maskable"
+      "purpose": "any"
     }
   ]
 }
