@@ -1,0 +1,685 @@
+<!DOCTYPE html>
+<html lang="pt-BR">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Controle de Cartão</title>
+<script src="https://www.gstatic.com/firebasejs/10.8.0/firebase-app-compat.js"></script>
+<script src="https://www.gstatic.com/firebasejs/10.8.0/firebase-firestore-compat.js"></script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/react/18.2.0/umd/react.production.min.js"></script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/react-dom/18.2.0/umd/react-dom.production.min.js"></script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/babel-standalone/7.23.9/babel.min.js"></script>
+<style>* { margin: 0; padding: 0; box-sizing: border-box; } body { background: #080810; }</style>
+</head>
+<body>
+<div id="root"></div>
+<script type="text/babel">
+const { useState, useMemo, useEffect, useRef } = React;
+const MO=["Abril/2023","Maio/2023","Junho/2023","Julho/2023","Agosto/2023","Setembro/2023","Outubro/2023","Novembro/2023","Dezembro/2023","Janeiro/2024","Fevereiro/2024","Março/2024","Abril/2024","Maio/2024","Junho/2024","Julho/2024","Agosto/2024","Setembro/2024","Outubro/2024","Novembro/2024","Dezembro/2024","Janeiro/2025","Fevereiro/2025","Março/2025","Abril/2025","Maio/2025","Junho/2025","Julho/2025","Agosto/2025","Setembro/2025","Outubro/2025","Novembro/2025","Dezembro/2025","Janeiro/2026","Fevereiro/2026","Março/2026","Abril/2026","Maio/2026","Junho/2026","Julho/2026","Agosto/2026","Setembro/2026","Outubro/2026","Novembro/2026","Dezembro/2026"];
+const MS=["Jan","Fev","Mar","Abr","Mai","Jun","Jul","Ago","Set","Out","Nov","Dez"];
+const MM={"Janeiro":0,"Fevereiro":1,"Março":2,"Abril":3,"Maio":4,"Junho":5,"Julho":6,"Agosto":7,"Setembro":8,"Outubro":9,"Novembro":10,"Dezembro":11};
+const MN=["Janeiro","Fevereiro","Março","Abril","Maio","Junho","Julho","Agosto","Setembro","Outubro","Novembro","Dezembro"];
+function pmk(k){if(!k)return null;const p=k.split("/");if(p.length!==2)return null;return{month:MM[p[0]]??0,year:parseInt(p[1])};}
+function cmk(){const n=new Date();return`${MN[n.getMonth()]}/${n.getFullYear()}`;}
+function fB(v){if(v==null||isNaN(v))return"R$ 0,00";return"R$ "+v.toLocaleString("pt-BR",{minimumFractionDigits:2,maximumFractionDigits:2});}
+function fD(d){if(!d)return"—";if(d.includes("-")){const p=d.split("-");if(p[0].length===4)return`${p[2]}/${p[1]}/${p[0]}`;}return d;}
+
+function calcStartMonth(dateStr){
+  if(!dateStr)return cmk();
+  const p=dateStr.split("/");
+  const day=parseInt(p[0]),month=parseInt(p[1])-1,year=parseInt(p[2]);
+  if(isNaN(day)||isNaN(month)||isNaN(year))return cmk();
+  const yr=year<100?year+2000:year;
+  if(day<=18)return`${MN[month]}/${yr}`;
+  const nm=month===11?0:month+1;const ny=month===11?yr+1:yr;
+  return`${MN[nm]}/${ny}`;
+}
+
+function maskDate(val){
+  let d=val.replace(/\D/g,"");
+  if(d.length>8)d=d.slice(0,8);
+  if(d.length>=5)return d.slice(0,2)+"/"+d.slice(2,4)+"/"+d.slice(4);
+  if(d.length>=3)return d.slice(0,2)+"/"+d.slice(2);
+  return d;
+}
+
+const SEED_P=[{"id":1,"data":null,"loja":"Ch. Menina","total":6310.36,"parcelas":4,"monthly":{"Abril/2023":1577.59,"Maio/2023":1577.59,"Junho/2023":1577.59,"Julho/2023":1577.59}},{"id":2,"data":null,"loja":"Ch. Menina","total":4303.88,"parcelas":4,"monthly":{"Maio/2023":1075.97,"Junho/2023":1075.97,"Julho/2023":1075.97,"Agosto/2023":1075.97}},{"id":3,"data":null,"loja":"SS Atacadão","total":1762.72,"parcelas":3,"monthly":{"Maio/2023":587.57,"Junho/2023":587.57,"Julho/2023":587.57}},{"id":4,"data":null,"loja":"Ch. Menina","total":2444.6,"parcelas":3,"monthly":{"Maio/2023":814.87,"Junho/2023":814.87,"Julho/2023":814.87}},{"id":5,"data":null,"loja":"Repos","total":4259.04,"parcelas":3,"monthly":{"Maio/2023":1419.68,"Junho/2023":1419.68,"Julho/2023":1419.68}},{"id":6,"data":null,"loja":"Distribuidora","total":1852.35,"parcelas":3,"monthly":{"Maio/2023":617.45,"Junho/2023":617.45,"Julho/2023":617.45}},{"id":7,"data":null,"loja":"Celina","total":5679.46,"parcelas":2,"monthly":{"Junho/2023":2839.73,"Julho/2023":2839.73}},{"id":8,"data":null,"loja":"Mundial","total":3206.97,"parcelas":3,"monthly":{"Junho/2023":1068.99,"Julho/2023":1068.99,"Agosto/2023":1068.99}},{"id":9,"data":null,"loja":"Ch. Menina","total":5077.08,"parcelas":4,"monthly":{"Junho/2023":1269.27,"Julho/2023":1269.27,"Agosto/2023":1269.27,"Setembro/2023":1269.27}},{"id":10,"data":null,"loja":"Celina","total":6330.85,"parcelas":2,"monthly":{"Julho/2023":3165.43,"Agosto/2023":3165.43}},{"id":11,"data":null,"loja":"Shopee","total":985.52,"parcelas":3,"monthly":{"Julho/2023":328.51,"Agosto/2023":328.51,"Setembro/2023":328.51}},{"id":12,"data":null,"loja":"Shopee","total":483.33,"parcelas":3,"monthly":{"Julho/2023":161.11,"Agosto/2023":161.11,"Setembro/2023":161.11}},{"id":13,"data":null,"loja":"Shopee","total":242.25,"parcelas":3,"monthly":{"Julho/2023":80.75,"Agosto/2023":80.75,"Setembro/2023":80.75}},{"id":14,"data":null,"loja":"Shopee","total":326.62,"parcelas":3,"monthly":{"Julho/2023":108.87,"Agosto/2023":108.87,"Setembro/2023":108.87}},{"id":15,"data":"26/06/23","loja":"Ruby Rose","total":3874.72,"parcelas":5,"monthly":{"Julho/2023":774.94,"Agosto/2023":774.94,"Setembro/2023":774.94,"Outubro/2023":774.94,"Novembro/2023":774.94}},{"id":16,"data":"13/07/23","loja":"Bem Mulher","total":3003.58,"parcelas":6,"monthly":{"Agosto/2023":500.6,"Setembro/2023":500.6,"Outubro/2023":500.6,"Novembro/2023":500.6,"Dezembro/2023":500.6,"Janeiro/2024":500.6}},{"id":17,"data":"14/07/23","loja":"Ruby Rose","total":5358.36,"parcelas":5,"monthly":{"Agosto/2023":1071.67,"Setembro/2023":1071.67,"Outubro/2023":1071.67,"Novembro/2023":1071.67,"Dezembro/2023":1071.67}},{"id":18,"data":"17/07/23","loja":"Celina","total":5902.45,"parcelas":2,"monthly":{"Agosto/2023":2951.22,"Setembro/2023":2951.22}},{"id":19,"data":"19/07/23","loja":"Sex Shop","total":1797.03,"parcelas":3,"monthly":{"Agosto/2023":599.01,"Setembro/2023":599.01,"Outubro/2023":599.01}},{"id":20,"data":"20/07/23","loja":"Forbella","total":10000.0,"parcelas":3,"monthly":{"Agosto/2023":3333.33,"Setembro/2023":3333.33,"Outubro/2023":3333.33}},{"id":21,"data":"21/07/23","loja":"N/A","total":4485.09,"parcelas":3,"monthly":{"Agosto/2023":1495.03,"Setembro/2023":1495.03,"Outubro/2023":1495.03}},{"id":22,"data":"23/07/23","loja":"Shopee","total":919.78,"parcelas":3,"monthly":{"Agosto/2023":306.59,"Setembro/2023":306.59,"Outubro/2023":306.59}},{"id":23,"data":"16/08/23","loja":"Ruby Rose","total":5358.3,"parcelas":5,"monthly":{"Setembro/2023":1071.66,"Outubro/2023":1071.66,"Novembro/2023":1071.66,"Dezembro/2023":1071.66,"Janeiro/2024":1071.66}},{"id":24,"data":"16/08/23","loja":"Menela","total":1889.4,"parcelas":4,"monthly":{"Setembro/2023":472.35,"Outubro/2023":472.35,"Novembro/2023":472.35,"Dezembro/2023":472.35}},{"id":25,"data":"19/08/23","loja":"Celina","total":6587.29,"parcelas":2,"monthly":{"Setembro/2023":3293.64,"Outubro/2023":3293.64}},{"id":26,"data":"28/08/23","loja":"AMZ (Bike)","total":2425.5,"parcelas":10,"monthly":{"Setembro/2023":242.55,"Outubro/2023":242.55,"Novembro/2023":242.55,"Dezembro/2023":242.55,"Janeiro/2024":242.55,"Fevereiro/2024":242.55,"Março/2024":242.55,"Abril/2024":242.55,"Maio/2024":242.55,"Junho/2024":242.55}},{"id":27,"data":"26/09/23","loja":"Ruby Rose","total":6039.46,"parcelas":5,"monthly":{"Outubro/2023":1207.89,"Novembro/2023":1207.89,"Dezembro/2023":1207.89,"Janeiro/2024":1207.89,"Fevereiro/2024":1207.89}},{"id":28,"data":"18/10/23","loja":"Litoral","total":5531.4,"parcelas":3,"monthly":{"Novembro/2023":1843.8,"Dezembro/2023":1843.8,"Janeiro/2024":1843.8}},{"id":29,"data":"16/10/23","loja":"Shopee","total":983.38,"parcelas":1,"monthly":{"Novembro/2023":983.38}},{"id":30,"data":"25/10/23","loja":"Bem Mulher","total":6588.58,"parcelas":5,"monthly":{"Novembro/2023":1317.72,"Dezembro/2023":1317.72,"Janeiro/2024":1317.72,"Fevereiro/2024":1317.72,"Março/2024":1317.72}},{"id":31,"data":"2710/23","loja":"Sex Shop","total":6130.66,"parcelas":5,"monthly":{"Novembro/2023":1226.13,"Dezembro/2023":1226.13,"Janeiro/2024":1226.13,"Fevereiro/2024":1226.13,"Março/2024":1226.13}},{"id":32,"data":"28/10/23","loja":"Forever Liss","total":1899.13,"parcelas":3,"monthly":{"Novembro/2023":633.04,"Dezembro/2023":633.04,"Janeiro/2024":633.04}},{"id":33,"data":"29/10/23","loja":"Shopee","total":846.22,"parcelas":3,"monthly":{"Novembro/2023":282.07,"Dezembro/2023":282.07,"Janeiro/2024":282.07}},{"id":34,"data":"29/10/23","loja":"Shopee","total":934.86,"parcelas":3,"monthly":{"Novembro/2023":311.62,"Dezembro/2023":311.62,"Janeiro/2024":311.62}},{"id":35,"data":"30/10/23","loja":"Celina","total":19369.97,"parcelas":3,"monthly":{"Novembro/2023":6456.66,"Dezembro/2023":6456.66,"Janeiro/2024":6456.66}},{"id":36,"data":"30/10/23","loja":"Mundial","total":6291.0,"parcelas":4,"monthly":{"Novembro/2023":1572.75,"Dezembro/2023":1572.75,"Janeiro/2024":1572.75,"Fevereiro/2024":1572.75}},{"id":37,"data":"06/11/2023","loja":"Ruby Rose","total":4884.12,"parcelas":5,"monthly":{"Novembro/2023":976.82,"Dezembro/2023":976.82,"Janeiro/2024":976.82,"Fevereiro/2024":976.82,"Março/2024":976.82}},{"id":38,"data":"13/12/23","loja":"Ruby Rose","total":6074.87,"parcelas":5,"monthly":{"Janeiro/2024":1214.97,"Fevereiro/2024":1214.97,"Março/2024":1214.97,"Abril/2024":1214.97,"Maio/2024":1214.97}},{"id":39,"data":"09/01/2024","loja":"Celina","total":22498.03,"parcelas":4,"monthly":{"Janeiro/2024":5624.51,"Fevereiro/2024":5624.51,"Março/2024":5624.51,"Abril/2024":5624.51}},{"id":40,"data":"24/01/24","loja":"M. Livre","total":2995.08,"parcelas":3,"monthly":{"Fevereiro/2024":998.36,"Março/2024":998.36,"Abril/2024":998.36}},{"id":41,"data":"24/01/24","loja":"Celina","total":5029.62,"parcelas":3,"monthly":{"Fevereiro/2024":1676.54,"Março/2024":1676.54,"Abril/2024":1676.54}},{"id":42,"data":"25/01/24","loja":"ZAX","total":3174.8,"parcelas":3,"monthly":{"Fevereiro/2024":1058.27,"Março/2024":1058.27,"Abril/2024":1058.27}},{"id":43,"data":"31/01/24","loja":"Bem Mulher","total":3942.59,"parcelas":6,"monthly":{"Fevereiro/2024":657.1,"Março/2024":657.1,"Abril/2024":657.1,"Maio/2024":657.1,"Junho/2024":657.1,"Julho/2024":657.1}},{"id":44,"data":"16/02/24","loja":"C. Menina","total":4828.44,"parcelas":4,"monthly":{"Março/2024":1207.11,"Abril/2024":1207.11,"Maio/2024":1207.11,"Junho/2024":1207.11}},{"id":45,"data":"27/03/24","loja":"Celina","total":14543.93,"parcelas":3,"monthly":{"Abril/2024":4847.98,"Maio/2024":4847.98,"Junho/2024":4847.98}},{"id":46,"data":"27/03/24","loja":"Bem Mulher","total":1593.0,"parcelas":2,"monthly":{"Abril/2024":796.5,"Maio/2024":796.5}},{"id":47,"data":"27/03/24","loja":"Bem Mulher","total":12330.84,"parcelas":6,"monthly":{"Abril/2024":2055.14,"Maio/2024":2055.14,"Junho/2024":2055.14,"Julho/2024":2055.14,"Agosto/2024":2055.14,"Setembro/2024":2055.14}},{"id":48,"data":"23/04/2024","loja":"M. Livre","total":2160.0,"parcelas":1,"monthly":{"Maio/2024":2160.0}},{"id":49,"data":"02/05/2024","loja":"Menela","total":2015.36,"parcelas":4,"monthly":{"Maio/2024":503.84,"Junho/2024":503.84,"Julho/2024":503.84,"Agosto/2024":503.84}},{"id":50,"data":"04/05/2024","loja":"Shopee","total":861.87,"parcelas":3,"monthly":{"Maio/2024":287.29,"Junho/2024":287.29,"Julho/2024":287.29}},{"id":51,"data":"07/05/2024","loja":"C. Menina","total":4146.68,"parcelas":4,"monthly":{"Maio/2024":1036.67,"Junho/2024":1036.67,"Julho/2024":1036.67}},{"id":52,"data":"21/05/2024","loja":"Celina","total":11979.58,"parcelas":3,"monthly":{"Junho/2024":3993.19,"Julho/2024":3993.19,"Agosto/2024":3993.19}},{"id":53,"data":"21/05/2024","loja":"Bem Mulher","total":14759.18,"parcelas":6,"monthly":{"Junho/2024":2459.86,"Julho/2024":2459.86,"Agosto/2024":2459.86,"Setembro/2024":2459.86,"Outubro/2024":2459.86,"Novembro/2024":2459.86}},{"id":54,"data":"21/05/2024","loja":"Bem Mulher","total":819.0,"parcelas":2,"monthly":{"Junho/2024":409.5,"Julho/2024":409.5}},{"id":55,"data":"22/05/2024","loja":"Litoral Cosm.","total":5097.78,"parcelas":3,"monthly":{"Junho/2024":1699.26,"Julho/2024":1699.26,"Agosto/2024":1699.26}},{"id":56,"data":"10/06/2024","loja":"Shopee","total":786.07,"parcelas":3,"monthly":{"Julho/2024":262.02,"Agosto/2024":262.02,"Setembro/2024":262.02}},{"id":57,"data":"10/06/2024","loja":"Shopee","total":582.31,"parcelas":3,"monthly":{"Julho/2024":194.1,"Agosto/2024":194.1,"Setembro/2024":194.1}},{"id":58,"data":"12/06/2024","loja":"C. Menina","total":5082.26,"parcelas":4,"monthly":{"Julho/2024":1270.57,"Agosto/2024":1270.57,"Setembro/2024":1270.57,"Outubro/2024":1270.57}},{"id":59,"data":"04/07/2024","loja":"C. Kennedy","total":3079.0,"parcelas":6,"monthly":{"Agosto/2024":513.17,"Setembro/2024":513.17,"Outubro/2024":513.17,"Novembro/2024":513.17,"Dezembro/2024":513.17,"Janeiro/2025":513.17}},{"id":60,"data":"04/07/2024","loja":"C. Kennedy","total":1554.1,"parcelas":3,"monthly":{"Agosto/2024":518.03,"Setembro/2024":518.03,"Outubro/2024":518.03,"Novembro/2024":518.03}},{"id":61,"data":"08/07/2024","loja":"Vòlia","total":3265.2,"parcelas":3,"monthly":{"Agosto/2024":1088.4,"Setembro/2024":1088.4,"Outubro/2024":1088.4}},{"id":62,"data":"11/07/2024","loja":"Celina","total":6641.77,"parcelas":2,"monthly":{"Agosto/2024":3320.89,"Setembro/2024":3320.89}},{"id":63,"data":"15/08/2024","loja":"Auto-Escola","total":3348.0,"parcelas":6,"monthly":{"Setembro/2024":558.0,"Outubro/2024":558.0,"Novembro/2024":558.0,"Dezembro/2024":558.0,"Janeiro/2025":558.0,"Fevereiro/2025":558.0}},{"id":64,"data":"15/08/2024","loja":"C. Menina","total":5174.08,"parcelas":4,"monthly":{"Setembro/2024":1293.52,"Outubro/2024":1293.52,"Novembro/2024":1293.52,"Dezembro/2024":1293.52}},{"id":65,"data":"15/08/2024","loja":"Henna Menela","total":3054.53,"parcelas":4,"monthly":{"Setembro/2024":763.63,"Outubro/2024":763.63,"Novembro/2024":763.63,"Dezembro/2024":763.63}},{"id":66,"data":"16/08/2024","loja":"Tutti Cosmet.","total":5233.75,"parcelas":3,"monthly":{"Setembro/2024":1744.58,"Outubro/2024":1744.58,"Novembro/2024":1744.58}},{"id":67,"data":"27/08/2024","loja":"Bem Mulher","total":11495.03,"parcelas":6,"monthly":{"Setembro/2024":1915.84,"Outubro/2024":1915.84,"Novembro/2024":1915.84,"Dezembro/2024":1915.84,"Janeiro/2025":1915.84,"Fevereiro/2025":1915.84}},{"id":68,"data":"28/08/2024","loja":"Celina","total":26906.9,"parcelas":3,"monthly":{"Setembro/2024":8968.97,"Outubro/2024":8968.97,"Novembro/2024":8968.97}},{"id":69,"data":"19/09/2024","loja":"Splash","total":5132.81,"parcelas":6,"monthly":{"Outubro/2024":855.47,"Novembro/2024":855.47,"Dezembro/2024":855.47,"Janeiro/2025":855.47,"Fevereiro/2025":855.47,"Março/2025":855.47}},{"id":70,"data":"26/09/2024","loja":"Litoral","total":4005.36,"parcelas":3,"monthly":{"Outubro/2024":1335.12,"Novembro/2024":1335.12,"Dezembro/2024":1335.12}},{"id":71,"data":"09/10/2024","loja":"Shopee","total":1053.47,"parcelas":3,"monthly":{"Novembro/2024":351.16,"Dezembro/2024":351.16,"Janeiro/2025":351.16}},{"id":72,"data":"10/10/2024","loja":"Shopee","total":1003.3,"parcelas":3,"monthly":{"Novembro/2024":334.43,"Dezembro/2024":334.43,"Janeiro/2025":334.43}},{"id":73,"data":"22/10/2024","loja":"Celina","total":6073.28,"parcelas":2,"monthly":{"Novembro/2024":3036.64,"Dezembro/2024":3036.64}},{"id":74,"data":"21/11/2024","loja":"Bem Mulher","total":13300.26,"parcelas":6,"monthly":{"Dezembro/2024":2216.71,"Janeiro/2025":2216.71,"Fevereiro/2025":2216.71,"Março/2025":2216.71,"Abril/2025":2216.71,"Maio/2025":2216.71}},{"id":75,"data":"22/11/2024","loja":"Celina","total":38320.95,"parcelas":2,"monthly":{"Dezembro/2024":19160.47,"Janeiro/2025":19160.47}},{"id":76,"data":"07/12/2024","loja":"C. Menina","total":4668.37,"parcelas":4,"monthly":{"Dezembro/2024":1167.09,"Janeiro/2025":1167.09,"Fevereiro/2025":1167.09,"Março/2025":1167.09}},{"id":77,"data":"07/12/2024","loja":"Master Bel.","total":1768.52,"parcelas":4,"monthly":{"Dezembro/2024":442.13,"Janeiro/2025":442.13,"Fevereiro/2025":442.13,"Março/2025":442.13}},{"id":78,"data":"03/01/2025","loja":"Iphone","total":9358.9,"parcelas":6,"monthly":{"Janeiro/2025":5000.0,"Fevereiro/2025":726.48,"Março/2025":726.48,"Abril/2025":726.48,"Maio/2025":726.48,"Junho/2025":726.48,"Julho/2025":726.48}},{"id":79,"data":"20/01/2025","loja":"CFR Atacado","total":3937.96,"parcelas":3,"monthly":{"Fevereiro/2025":1312.65,"Março/2025":1312.65,"Abril/2025":1312.65}},{"id":80,"data":"21/01/2025","loja":"Mult King","total":2462.85,"parcelas":3,"monthly":{"Fevereiro/2025":820.95,"Março/2025":820.95,"Abril/2025":820.95}},{"id":81,"data":"21/01/2025","loja":"P. Cílios","total":2313.92,"parcelas":1,"monthly":{"Fevereiro/2025":2313.92}},{"id":82,"data":"22/01/2025","loja":"C. Menina","total":4138.32,"parcelas":3,"monthly":{"Fevereiro/2025":1379.44,"Março/2025":1379.44,"Abril/2025":1379.44}},{"id":83,"data":"22/01/2025","loja":"Repos Cosm.","total":5632.0,"parcelas":3,"monthly":{"Fevereiro/2025":1877.33,"Março/2025":1877.33,"Abril/2025":1877.33}},{"id":84,"data":"27/01/2025","loja":"C. Kennedy","total":2676.0,"parcelas":5,"monthly":{"Fevereiro/2025":535.2,"Março/2025":535.2,"Abril/2025":535.2,"Maio/2025":535.2,"Junho/2025":535.2}},{"id":85,"data":"27/01/2025","loja":"C. Kennedy","total":2228.0,"parcelas":5,"monthly":{"Fevereiro/2025":445.6,"Março/2025":445.6,"Abril/2025":445.6,"Maio/2025":445.6,"Junho/2025":445.6}},{"id":86,"data":"19/02/2025","loja":"Celina","total":32831.12,"parcelas":3,"monthly":{"Março/2025":10943.71,"Abril/2025":10943.71,"Maio/2025":10943.71}},{"id":87,"data":"19/02/2025","loja":"Bem Mulher","total":11550.15,"parcelas":6,"monthly":{"Março/2025":1925.03,"Abril/2025":1925.03,"Maio/2025":1925.03,"Junho/2025":1925.03,"Julho/2025":1925.03,"Agosto/2025":1925.03}},{"id":88,"data":"18/03/2025","loja":"Tutti","total":5253.1,"parcelas":3,"monthly":{"Abril/2025":1751.03,"Maio/2025":1751.03,"Junho/2025":1751.03}},{"id":89,"data":"04/04/2025","loja":"Celina","total":7006.0,"parcelas":2,"monthly":{"Abril/2025":3503.0,"Maio/2025":3503.0}},{"id":90,"data":"22/04/2025","loja":"CFR Atacado","total":5072.33,"parcelas":3,"monthly":{"Maio/2025":1690.78,"Junho/2025":1690.78,"Julho/2025":1690.78}},{"id":91,"data":"30/04/2025","loja":"C. Menina","total":5497.2,"parcelas":4,"monthly":{"Maio/2025":1374.3,"Junho/2025":1374.3,"Julho/2025":1374.3,"Agosto/2025":1374.3}},{"id":92,"data":"19/05/2025","loja":"Amapuera","total":10400.0,"parcelas":3,"monthly":{"Junho/2025":3466.67,"Julho/2025":3466.67,"Agosto/2025":3466.67}},{"id":93,"data":"23/05/2025","loja":"Bem Mulher","total":19903.15,"parcelas":6,"monthly":{"Junho/2025":3317.19,"Julho/2025":3317.19,"Agosto/2025":3317.19,"Setembro/2025":3317.19,"Outubro/2025":3317.19,"Novembro/2025":3317.19}},{"id":94,"data":"26/05/2025","loja":"Celina","total":40476.34,"parcelas":3,"monthly":{"Junho/2025":13492.11,"Julho/2025":13492.11,"Agosto/2025":13492.11}},{"id":95,"data":"18/07/2025","loja":"Celina","total":3429.0,"parcelas":1,"monthly":{"Agosto/2025":3429.0}},{"id":96,"data":"19/07/2025","loja":"Merc. Pago","total":1676.64,"parcelas":2,"monthly":{"Agosto/2025":838.32,"Setembro/2025":838.32}},{"id":97,"data":"20/07/2025","loja":"Starlink","total":2040.0,"parcelas":3,"monthly":{"Agosto/2025":680.0,"Setembro/2025":680.0,"Outubro/2025":680.0}},{"id":98,"data":"12/08/2025","loja":"Merc. Pago","total":19895.0,"parcelas":3,"monthly":{"Agosto/2025":6631.67,"Setembro/2025":6631.67,"Outubro/2025":6631.67}},{"id":99,"data":"19/08/2025","loja":"Celina","total":30589.82,"parcelas":3,"monthly":{"Setembro/2025":10196.61,"Outubro/2025":10196.61,"Novembro/2025":10196.61}},{"id":100,"data":"20/08/2025","loja":"Bem Mulher","total":7982.52,"parcelas":6,"monthly":{"Setembro/2025":1330.42,"Outubro/2025":1330.42,"Novembro/2025":1330.42,"Dezembro/2025":1330.42,"Janeiro/2026":1330.42,"Fevereiro/2026":1330.42}},{"id":101,"data":"25/08/2025","loja":"CFR","total":4570.75,"parcelas":3,"monthly":{"Setembro/2025":1523.58,"Outubro/2025":1523.58,"Novembro/2025":1523.58}},{"id":102,"data":"28/08/2025","loja":"BP Maquiagem","total":3252.98,"parcelas":2,"monthly":{"Setembro/2025":1626.49,"Outubro/2025":1626.49}},{"id":103,"data":"19/09/2025","loja":"Mer. Livre","total":2401.31,"parcelas":3,"monthly":{"Outubro/2025":800.44,"Novembro/2025":800.44,"Dezembro/2025":800.44}},{"id":104,"data":"29/09/2025","loja":"Celina","total":6548.0,"parcelas":2,"monthly":{"Outubro/2025":3274.0,"Novembro/2025":3274.0}},{"id":105,"data":"30/09/2025","loja":"Cílios Divas","total":2722.22,"parcelas":3,"monthly":{"Outubro/2025":907.41,"Novembro/2025":907.41,"Dezembro/2025":907.41}},{"id":106,"data":"28/10/2025","loja":"Celina","total":59715.91,"parcelas":4,"monthly":{"Novembro/2025":14928.98,"Dezembro/2025":14928.98,"Janeiro/2026":14928.98,"Fevereiro/2026":14928.98}},{"id":107,"data":"26/12/2025","loja":"Center Kennedy","total":4317.0,"parcelas":1,"monthly":{"Janeiro/2026":4317.0}},{"id":108,"data":"26/12/2025","loja":"Shopee","total":3448.3,"parcelas":4,"monthly":{"Janeiro/2026":862.08,"Fevereiro/2026":862.08,"Março/2026":862.08,"Abril/2026":862.08}},{"id":109,"data":"26/12/2025","loja":"Shopee","total":3808.0,"parcelas":4,"monthly":{"Janeiro/2026":952.0,"Fevereiro/2026":952.0,"Março/2026":952.0,"Abril/2026":952.0}},{"id":110,"data":"15/01/2026","loja":"Celina","total":4685.94,"parcelas":1,"monthly":{"Janeiro/2026":4685.94}},{"id":111,"data":"17/01/2026","loja":"Maestrello","total":2956.58,"parcelas":3,"monthly":{"Fevereiro/2026":985.53,"Março/2026":985.53,"Abril/2026":985.53}},{"id":112,"data":"19/01/2026","loja":"Celina","total":49169.14,"parcelas":3,"monthly":{"Fevereiro/2026":16389.71,"Março/2026":16389.71,"Abril/2026":16389.71}},{"id":113,"data":"20/01/2026","loja":"Bem Mulher","total":5886.09,"parcelas":6,"monthly":{"Fevereiro/2026":981.01,"Março/2026":981.01,"Abril/2026":981.01,"Maio/2026":981.01,"Junho/2026":981.01,"Julho/2026":981.01}},{"id":114,"data":"20/01/2026","loja":"Cílios das Divas","total":3578.5,"parcelas":3,"monthly":{"Fevereiro/2026":1192.83,"Março/2026":1192.83,"Abril/2026":1192.83}},{"id":115,"data":"25/02/2026","loja":"CFR Atacado","total":3172.35,"parcelas":3,"monthly":{"Março/2026":1057.45,"Abril/2026":1057.45,"Maio/2026":1057.45}},{"id":116,"data":"01/03/2026","loja":"Shopee","total":2499.0,"parcelas":5,"monthly":{"Março/2026":499.8,"Abril/2026":499.8,"Maio/2026":499.8,"Junho/2026":499.8,"Julho/2026":499.8}},{"id":117,"data":"06/03/2026","loja":"Celina","total":7090.74,"parcelas":2,"monthly":{"Março/2026":3545.37,"Abril/2026":3545.37}},{"id":118,"data":"06/03/2026","loja":"Bem Mulher","total":4200.0,"parcelas":5,"monthly":{"Março/2026":840.0,"Abril/2026":840.0,"Maio/2026":840.0,"Junho/2026":840.0,"Julho/2026":840.0}}];
+const SEED_PPL={"Kelly":[{"item":"Cama","total":2493.39,"payments":[{"month":"Julho/2024","amount":249.39,"date":"17/07/2024"},{"month":"Agosto/2024","amount":249.39,"date":"19/08/2024"},{"month":"Setembro/2024","amount":249.39,"date":"19/09/2024"},{"month":"Outubro/2024","amount":249.39,"date":"18/10/2024"},{"month":"Novembro/2024","amount":249.39,"date":"18/11/2024"},{"month":"Dezembro/2024","amount":249.39,"date":"19/12/2024"},{"month":"Janeiro/2025","amount":249.39,"date":"20/01/2025"},{"month":"Fevereiro/2025","amount":249.39,"date":"18/02/2025"},{"month":"Março/2025","amount":249.39,"date":"19/03/2025"},{"month":"Abril/2025","amount":248.88,"date":"16/04/2025"}],"remaining":0}],"Katia":[{"item":"Televisão","total":210.08,"payments":[{"month":"Outubro/2023","amount":300,"date":null},{"month":"Novembro/2023","amount":554.34,"date":"18/11/2023"},{"month":"Dezembro/2023","amount":554.34,"date":"16/12/2023"},{"month":"Janeiro/2024","amount":421.57,"date":"18/01/2024"}],"remaining":0},{"item":"Geladeira","total":3098.9,"payments":[{"month":"Novembro/2023","amount":1000,"date":"25/11/2023"},{"month":"Dezembro/2023","amount":649.75,"date":"16/12/2023"},{"month":"Janeiro/2024","amount":483.05,"date":"18/01/2024"},{"month":"Fevereiro/2024","amount":483.05,"date":"17/02/2024"},{"month":"Março/2024","amount":483.05,"date":"18/03/2024"}],"remaining":0},{"item":"Bomba","total":886.19,"payments":[{"month":"Outubro/2024","amount":221.55,"date":"18/10/2024"},{"month":"Novembro/2024","amount":221.65,"date":"18/11/2024"},{"month":"Dezembro/2024","amount":221.65,"date":"19/12/2024"},{"month":"Janeiro/2025","amount":221.34,"date":"20/12/2024"}],"remaining":0}],"Katilene":[{"item":"Celular","total":1828.9,"payments":[{"month":"Baixa 1","amount":700,"date":"2023-01-09"},{"month":"Baixa 2","amount":500,"date":"13/09/2023"},{"month":"Baixa 3","amount":400,"date":"2023-07-10"},{"month":"Baixa 4","amount":228.2,"date":"30/11/2023"},{"month":"Baixa 5","amount":0.7,"date":"17/07/2024"}],"remaining":0}],"Jaciana":[{"item":"Passagem","total":1286.5,"payments":[{"month":"Maio/2024","amount":257.3,"date":"18/05/2024"},{"month":"Junho/2024","amount":257.3,"date":"18/06/2024"},{"month":"Julho/2024","amount":257.3,"date":"17/07/2024"},{"month":"Agosto/2024","amount":257.3,"date":"19/08/2024"},{"month":"Setembro/2024","amount":257.3,"date":"19/09/2024"}],"remaining":0}]};
+const SEED_BX={"Agosto/2023":[{"amount":15653.15,"date":null}],"Setembro/2023":[{"amount":18061.12,"date":null}],"Outubro/2023":[{"amount":14369.27,"date":null}],"Novembro/2023":[{"amount":20945.66,"date":null}],"Dezembro/2023":[{"amount":19187.34,"date":null}],"Janeiro/2024":[{"amount":24482.8,"date":null}],"Fevereiro/2024":[{"amount":17773.61,"date":null}],"Março/2024":[{"amount":17273.61,"date":null}],"Abril/2024":[{"amount":19305.45,"date":null}],"Maio/2024":[{"amount":15009.15,"date":null}],"Junho/2024":[{"amount":19399.57,"date":null}],"Julho/2024":[{"amount":15000,"date":null}],"Agosto/2024":[{"amount":16861.87,"date":null}],"Setembro/2024":[{"amount":27771.87,"date":null}],"Outubro/2024":[{"amount":21950,"date":null}],"Novembro/2024":[{"amount":24648.42,"date":null}],"Dezembro/2024":[{"amount":33943.38,"date":null}],"Janeiro/2025":[{"amount":32514.47,"date":null}],"Fevereiro/2025":[{"amount":16600,"date":null}],"Março/2025":[{"amount":24614.62,"date":null}],"Abril/2025":[{"amount":27437.13,"date":null}],"Maio/2025":[{"amount":25111.84,"date":null}],"Junho/2025":[{"amount":28724.39,"date":null}],"Julho/2025":[{"amount":25992.56,"date":null}],"Agosto/2025":[{"amount":35410,"date":null}],"Setembro/2025":[{"amount":26200,"date":null}],"Outubro/2025":[{"amount":30060,"date":null}],"Novembro/2025":[{"amount":36200,"date":null}],"Dezembro/2025":[{"amount":17962.2,"date":null}],"Janeiro/2026":[{"amount":27077,"date":null}],"Fevereiro/2026":[{"amount":37622.53,"date":null}],"Março/2026":[{"amount":4300,"date":"14/03/2026"},{"amount":4150,"date":"16/03/2026"},{"amount":4500,"date":"17/03/2026"},{"amount":4950,"date":"18/03/2026"}]};
+const SEED_ACUM={"Agosto/2023":0,"Setembro/2023":0,"Outubro/2023":0,"Novembro/2023":0,"Dezembro/2023":0,"Janeiro/2024":0,"Fevereiro/2024":0,"Março/2024":1073.54,"Abril/2024":-0.04,"Maio/2024":-0.04,"Junho/2024":1335.16,"Julho/2024":1506.61,"Agosto/2024":490.01,"Setembro/2024":1335.16,"Outubro/2024":0,"Novembro/2024":0,"Dezembro/2024":0,"Janeiro/2025":0,"Fevereiro/2025":33.18,"Março/2025":0.01,"Abril/2025":0,"Maio/2025":0.01,"Junho/2025":0.01,"Julho/2025":0.02,"Agosto/2025":255.74,"Setembro/2025":311.47,"Outubro/2025":83.67,"Novembro/2025":5.05,"Dezembro/2025":0.01,"Janeiro/2026":0.60,"Fevereiro/2026":0.57};
+// ─── FIREBASE CONFIG ─────────────────────────────
+const FB_CFG={apiKey:"AIzaSyDjoF7vPKRgXtNhhDyky5GQvfp76vgB99c",authDomain:"cartao-491a2.firebaseapp.com",projectId:"cartao-491a2",storageBucket:"cartao-491a2.firebasestorage.app",messagingSenderId:"967186616580",appId:"1:967186616580:web:27e525936cb5d0d92c4051"};
+let db=null;
+function initFB(){
+  if(db)return db;
+  try{
+    if(typeof firebase==="undefined")return null;
+    if(!firebase.apps.length)firebase.initializeApp(FB_CFG);
+    db=firebase.firestore();
+    return db;
+  }catch(e){console.error("Firebase init error:",e);return null;}
+}
+const DOC_PATH="data/main";
+async function ld(){
+  try{
+    const fdb=initFB();
+    if(fdb){
+      const doc=await fdb.doc(DOC_PATH).get();
+      if(doc.exists){
+        const d=doc.data();
+        if(d?.purchases){
+          // Parse JSON strings if stored as strings
+          const purchases=typeof d.purchases==="string"?JSON.parse(d.purchases):d.purchases;
+          const people=typeof d.people==="string"?JSON.parse(d.people):d.people;
+          const baixas=typeof d.baixas==="string"?JSON.parse(d.baixas):d.baixas;
+          // Merge seed baixas for missing months
+          const bx=baixas||{};
+          Object.keys(SEED_BX).forEach(m=>{if(!bx[m])bx[m]=SEED_BX[m];});
+          return{purchases,people:people||{},baixas:bx};
+        }
+      }
+    }
+  }catch(e){console.error("Load error:",e);}
+  // Fallback: try window.storage
+  try{
+    const r=await window.storage.get("cc-despesas-v10");
+    if(r){const d=JSON.parse(r.value);if(d?.purchases){const bx=d.baixas||{};Object.keys(SEED_BX).forEach(m=>{if(!bx[m])bx[m]=SEED_BX[m];});d.baixas=bx;return d;}}
+  }catch{}
+  return null;
+}
+async function sv(d){
+  try{
+    const fdb=initFB();
+    if(fdb){
+      // Firestore has 1MB doc limit, store as JSON strings to be safe
+      await fdb.doc(DOC_PATH).set({
+        purchases:JSON.stringify(d.purchases),
+        people:JSON.stringify(d.people),
+        baixas:JSON.stringify(d.baixas),
+        updatedAt:new Date().toISOString()
+      });
+      return true;
+    }
+  }catch(e){console.error("Save error:",e);}
+  // Fallback: window.storage
+  try{await window.storage.set("cc-despesas-v10",JSON.stringify(d));return true;}catch{}
+  return false;
+}
+
+const Z={bg:"#080810",cd:"#0e0e1a",cd2:"#13131f",bd:"#1c1c30",bd2:"#262640",tx:"#d8d5cf",tx2:"#7a7a9a",tx3:"#4a4a6a",ac:"#c084fc",ac2:"#a855f7",ac3:"#7c3aed",gn:"#34d399",yl:"#fbbf24",rd:"#f87171",ft:"'Outfit',system-ui,sans-serif",mn:"'JetBrains Mono',monospace"};
+
+function App(){
+  const[ps,setPs]=useState([]);const[ppl,setPpl]=useState({});const[baixas,setBaixas]=useState({});const[ok,setOk]=useState(false);const[saving,setSaving]=useState(false);
+  const[tab,setTab]=useState("dashboard");const[sm,setSm]=useState(cmk());const[sf,setSf]=useState(false);const[ep,setEp]=useState(null);const[sr,setSr]=useState("");const[toast,setToast]=useState(null);
+
+  useEffect(()=>{(async()=>{const d=await ld();if(d?.purchases){setPs(d.purchases);setPpl(d.people||{});setBaixas(d.baixas||{});}else{setPs(SEED_P);setPpl(SEED_PPL);setBaixas(SEED_BX);await sv({purchases:SEED_P,people:SEED_PPL,baixas:SEED_BX});}setOk(true);})();},[]);
+  const tr=useRef(null);
+  useEffect(()=>{if(!ok)return;if(tr.current)clearTimeout(tr.current);tr.current=setTimeout(async()=>{setSaving(true);const ok2=await sv({purchases:ps,people:ppl,baixas});setSaving(false);tt(ok2?"Salvo no Firebase ☁":"Salvo localmente");},.8e3);},[ps,ppl,baixas,ok]);
+  const tt=(m)=>{setToast(m);setTimeout(()=>setToast(null),2e3);};
+  const am=useMemo(()=>{const s=new Set(MO);ps.forEach(p=>Object.keys(p.monthly).forEach(m=>s.add(m)));return MO.filter(m=>s.has(m));},[ps]);
+  const mt=useMemo(()=>{const t={};am.forEach(m=>{t[m]=0;});ps.forEach(p=>Object.entries(p.monthly).forEach(([m,v])=>{t[m]=(t[m]||0)+v;}));return t;},[ps,am]);
+  const cmp=useMemo(()=>ps.filter(p=>p.monthly[sm]>0),[ps,sm]);
+  const ap=useMemo(()=>ps.filter(p=>{const k=Object.keys(p.monthly);if(!k.length)return true;return MO.indexOf(k[k.length-1])>=MO.indexOf(cmk());}),[ps]);
+  const td=useMemo(()=>{let t=0;const ci=MO.indexOf(cmk());ps.forEach(p=>Object.entries(p.monthly).forEach(([m,v])=>{if(MO.indexOf(m)>=ci)t+=v;}));return t;},[ps]);
+
+  if(!ok)return(<div style={{minHeight:"100vh",background:Z.bg,display:"flex",alignItems:"center",justifyContent:"center",color:Z.ac,fontFamily:Z.ft}}><div style={{textAlign:"center"}}><div style={{width:44,height:44,border:`3px solid ${Z.bd2}`,borderTopColor:Z.ac,borderRadius:"50%",animation:"sp .7s linear infinite",margin:"0 auto 14px"}}/><div style={{fontSize:13,color:Z.tx2}}>Carregando...</div><style>{`@keyframes sp{to{transform:rotate(360deg)}}`}</style></div></div>);
+
+  return(<div style={{minHeight:"100vh",background:Z.bg,color:Z.tx,fontFamily:Z.ft}}>
+    <link href="https://fonts.googleapis.com/css2?family=Outfit:wght@300;400;500;600;700&family=JetBrains+Mono:wght@400;500;700&display=swap" rel="stylesheet"/>
+    <style>{`@keyframes sp{to{transform:rotate(360deg)}}@keyframes fi{from{opacity:0;transform:translateY(6px)}to{opacity:1;transform:translateY(0)}}@keyframes ti{from{opacity:0;transform:translateY(16px)}to{opacity:1;transform:translateY(0)}}@keyframes pu{0%,100%{opacity:1}50%{opacity:.4}}*::-webkit-scrollbar{width:5px}*::-webkit-scrollbar-track{background:${Z.bg}}*::-webkit-scrollbar-thumb{background:${Z.bd2};border-radius:3px}input,select{outline:none}input:focus,select:focus{border-color:${Z.ac3}!important}button{transition:all .12s}button:hover{filter:brightness(1.1)}
+.g2{display:grid;grid-template-columns:1fr 1fr;gap:10px}
+.g2f{display:grid;grid-template-columns:1fr 1fr;gap:8px}
+.g3f{display:grid;grid-template-columns:1fr 1fr auto;gap:8px;align-items:end}
+.g3t{display:grid;grid-template-columns:1fr 1fr 1fr;gap:6px}
+@media(max-width:640px){
+  .g2,.g2f,.g3f,.g3t{grid-template-columns:1fr!important}
+  header{padding:10px 12px!important;flex-wrap:wrap;gap:8px}
+  header h1{font-size:13px!important}
+  header>div:last-child{width:100%;justify-content:flex-end}
+  nav{padding:0 8px!important;overflow-x:auto;-webkit-overflow-scrolling:touch}
+  nav button{padding:8px 8px!important;font-size:10px!important;white-space:nowrap}
+  main{padding:10px!important}
+  .stat-row{gap:6px!important}
+  .stat-row>div{min-width:0!important;flex:1 1 45%!important;padding:10px 12px!important}
+  .stat-row>div>div:nth-child(2){font-size:14px!important}
+  .bx-summary{flex-direction:column!important;align-items:flex-start!important;gap:4px!important}
+  .modal-inner{width:95%!important;padding:16px!important;max-height:90vh;overflow-y:auto}
+  table{font-size:9px!important}
+  .chart-wrap{overflow-x:auto;-webkit-overflow-scrolling:touch}
+}`}</style>
+
+    <header style={{background:Z.cd,borderBottom:`1px solid ${Z.bd}`,padding:"13px 18px",display:"flex",alignItems:"center",justifyContent:"space-between",position:"sticky",top:0,zIndex:50,flexWrap:"wrap",gap:8}}>
+      <div style={{display:"flex",alignItems:"center",gap:9}}>
+        <div style={{width:32,height:32,borderRadius:8,background:`linear-gradient(135deg,${Z.ac3},${Z.ac2})`,display:"flex",alignItems:"center",justifyContent:"center",fontFamily:Z.mn,fontWeight:700,fontSize:11,color:"#fff"}}>CC</div>
+        <div><h1 style={{margin:0,fontSize:14,fontWeight:600,letterSpacing:"-.02em"}}>Controle de Cartão</h1><div style={{fontSize:9,color:Z.tx3,display:"flex",alignItems:"center",gap:5}}>{saving?<><span style={{width:5,height:5,borderRadius:3,background:Z.yl,animation:"pu .8s ease infinite",display:"inline-block"}}/>Sincronizando...</>:<><span style={{width:5,height:5,borderRadius:3,background:Z.gn,display:"inline-block"}}/>Firebase ☁</>}</div></div>
+      </div>
+      <div style={{display:"flex",gap:6}}>
+        <button onClick={async()=>{if(!confirm("Resetar dados ao original?"))return;setPs(SEED_P);setPpl(SEED_PPL);setBaixas(SEED_BX);await sv({purchases:SEED_P,people:SEED_PPL,baixas:SEED_BX});tt("Restaurado");}} style={{background:Z.cd2,color:Z.tx2,border:`1px solid ${Z.bd}`,borderRadius:6,padding:"6px 9px",fontSize:10,cursor:"pointer"}}>Resetar</button>
+        <button onClick={()=>setSf(true)} style={{background:`linear-gradient(135deg,${Z.ac3},${Z.ac2})`,color:"#fff",border:"none",borderRadius:6,padding:"6px 12px",fontSize:11,fontWeight:600,cursor:"pointer",display:"flex",alignItems:"center",gap:4}}>+ Nova Compra</button>
+      </div>
+    </header>
+
+    <nav style={{display:"flex",gap:1,padding:"0 18px",background:Z.cd,borderBottom:`1px solid ${Z.bd}`,overflowX:"auto",WebkitOverflowScrolling:"touch"}}>
+      {[["dashboard","Dashboard"],["purchases","Compras"],["baixas","Baixas"],["people","Terceiros"],["reports","Relatórios"]].map(([id,lb])=>(<button key={id} onClick={()=>setTab(id)} style={{background:tab===id?Z.cd2:"transparent",color:tab===id?Z.ac:Z.tx2,border:"none",borderBottom:tab===id?`2px solid ${Z.ac2}`:"2px solid transparent",padding:"10px 13px",fontSize:11,fontWeight:500,cursor:"pointer"}}>{lb}</button>))}
+    </nav>
+
+    <main style={{padding:18,maxWidth:1100,margin:"0 auto",animation:"fi .25s ease"}}>
+      {tab==="dashboard"&&<Dash {...{mt,sm,setSm,cmp,td,ap,am,ps,baixas,setBaixas}}/>}
+      {tab==="purchases"&&<Purch {...{ps,setPs,sr,setSr,setEp}}/>}
+      {tab==="baixas"&&<BaixasView {...{baixas,setBaixas,mt,am}}/>}
+      {tab==="people"&&<Ppl ppl={ppl} setPpl={setPpl}/>}
+      {tab==="reports"&&<Rpts {...{ps,mt,am}}/>}
+    </main>
+
+    {sf&&<Frm onClose={()=>setSf(false)} onSave={p=>{setPs(v=>[...v,{...p,id:Date.now()}]);setSf(false);tt("Compra cadastrada!");}}/>}
+    {ep&&<Frm purchase={ep} onClose={()=>setEp(null)} onSave={p=>{setPs(v=>v.map(x=>x.id===ep.id?{...x,...p}:x));setEp(null);tt("Atualizado!");}}/>}
+    {toast&&<div style={{position:"fixed",bottom:20,left:"50%",transform:"translateX(-50%)",background:Z.cd2,border:`1px solid ${Z.bd2}`,borderRadius:9,padding:"8px 18px",fontSize:11,color:Z.ac,animation:"ti .25s ease",zIndex:200,boxShadow:"0 6px 24px rgba(0,0,0,.5)"}}>{toast}</div>}
+  </div>);
+}
+
+function St({label,value,sub,color=Z.ac}){return(<div style={{background:Z.cd,border:`1px solid ${Z.bd}`,borderRadius:10,padding:"14px 16px",flex:"1 1 170px",minWidth:150}}><div style={{fontSize:9,color:Z.tx3,fontWeight:500,textTransform:"uppercase",letterSpacing:".07em"}}>{label}</div><div style={{fontSize:18,fontWeight:700,color,marginTop:5,fontFamily:Z.mn}}>{value}</div>{sub&&<div style={{fontSize:9,color:Z.tx3,marginTop:2}}>{sub}</div>}</div>);}
+
+function Dash({mt,sm,setSm,cmp,td,ap,am,ps,baixas,setBaixas}){
+  const[selLoja,setSelLoja]=useState(null);
+  const[showAddBx,setShowAddBx]=useState(false);
+  const[bxAmt,setBxAmt]=useState("");
+  const[bxDate,setBxDate]=useState("");
+  const[bxErr,setBxErr]=useState({});
+
+  const c=mt[sm]||0;const pi=am.indexOf(sm)-1;const pv=pi>=0?(mt[am[pi]]||0):0;const df=pv>0?((c-pv)/pv*100):0;
+  const si=am.indexOf(sm);const cms=am.slice(Math.max(0,si-8),Math.min(am.length,si+8));const mx=Math.max(...cms.map(m=>mt[m]||0),1);
+  const st={};cmp.forEach(p=>{st[p.loja]=(st[p.loja]||0)+(p.monthly[sm]||0);});const ts=Object.entries(st).sort((a,b)=>b[1]-a[1]).slice(0,8);
+  const lojaPurchases=selLoja?cmp.filter(p=>p.loja===selLoja):[];
+
+  // Baixas do mês selecionado
+  const mBaixas=(baixas[sm]||[]);
+  const totalBaixas=mBaixas.reduce((s,b)=>s+b.amount,0);
+  const saldoMes=c-totalBaixas;
+
+  const addBaixa=()=>{
+    const e={};
+    const amt=parseMoney(bxAmt);
+    if(!bxAmt||amt<=0)e.amt="Valor inválido";
+    if(!bxDate)e.date="Informe a data";
+    else if(!isValidDate(bxDate))e.date="Data inválida";
+    setBxErr(e);
+    if(Object.keys(e).length>0)return;
+    setBaixas(prev=>{const updated={...prev};const list=[...(updated[sm]||[]),{amount:amt,date:bxDate}];updated[sm]=list;return updated;});
+    setBxAmt("");setBxDate("");setShowAddBx(false);setBxErr({});
+  };
+
+  const removeBaixa=(idx)=>{
+    setBaixas(prev=>{const updated={...prev};const list=[...(updated[sm]||[])];list.splice(idx,1);updated[sm]=list;return updated;});
+  };
+
+  const bxIs={width:"100%",background:Z.cd2,border:`1px solid ${Z.bd}`,borderRadius:5,padding:"6px 8px",color:Z.tx,fontSize:11,boxSizing:"border-box",fontFamily:Z.ft};
+  const bxIe={...bxIs,borderColor:Z.rd};
+  const bxES={fontSize:8,color:Z.rd,marginTop:1};
+
+  return(<div>
+    <div style={{display:"flex",alignItems:"center",gap:8,marginBottom:18}}><select value={sm} onChange={e=>{setSm(e.target.value);setSelLoja(null);setShowAddBx(false);}} style={{background:Z.cd,color:Z.tx,border:`1px solid ${Z.bd}`,borderRadius:6,padding:"6px 9px",fontSize:12,fontWeight:500,cursor:"pointer",fontFamily:Z.ft}}>{am.map(m=><option key={m} value={m}>{m}</option>)}</select></div>
+    <div className="stat-row" style={{display:"flex",gap:10,flexWrap:"wrap",marginBottom:18}}>
+      <St label="Fatura do Mês" value={fB(c)} sub={df!==0?`${df>0?"▲":"▼"} ${Math.abs(df).toFixed(1)}%`:null} color={Z.ac}/>
+      <St label="Baixas do Mês" value={fB(totalBaixas)} sub={`${mBaixas.length} pagamento${mBaixas.length!==1?"s":""}`} color={Z.gn}/>
+      <St label="Saldo do Mês" value={fB(saldoMes)} sub={saldoMes<=0?"Fatura quitada":"a pagar"} color={saldoMes<=0?Z.gn:Z.rd}/>
+      <St label="Dívida Total" value={fB(td)} sub="parcelas futuras" color={Z.yl}/>
+    </div>
+
+    {/* Baixas - Controle de Pagamentos */}
+    <div style={{background:Z.cd,border:`1px solid ${Z.bd}`,borderRadius:10,padding:16,marginBottom:18}}>
+      <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:10,flexWrap:"wrap",gap:6}}>
+        <div style={{fontSize:11,fontWeight:600,color:Z.ac}}>Baixas — {sm}</div>
+        <div className="bx-summary" style={{display:"flex",alignItems:"center",gap:8,flexWrap:"wrap"}}>
+          <span style={{fontSize:10,color:Z.tx3}}>Provisão: <span style={{fontFamily:Z.mn,color:Z.ac}}>{fB(c)}</span></span>
+          <span style={{fontSize:10,color:Z.tx3}}>Pago: <span style={{fontFamily:Z.mn,color:Z.gn}}>{fB(totalBaixas)}</span></span>
+          <span style={{fontSize:10,fontWeight:600,color:saldoMes<=0?Z.gn:Z.yl}}>Saldo: {fB(saldoMes)}</span>
+        </div>
+      </div>
+      {mBaixas.length>0&&(<table style={{width:"100%",fontSize:10,borderCollapse:"collapse",marginBottom:8}}>
+        <thead><tr style={{color:Z.tx3}}><th style={{textAlign:"left",padding:"4px 0",fontWeight:500}}>#</th><th style={{textAlign:"right",padding:"4px 0",fontWeight:500}}>Valor</th><th style={{textAlign:"right",padding:"4px 0",fontWeight:500}}>Data</th><th style={{textAlign:"center",padding:"4px 0",fontWeight:500,width:30}}></th></tr></thead>
+        <tbody>{mBaixas.map((b,i)=>(<tr key={i} style={{borderTop:`1px solid ${Z.bd}`}}>
+          <td style={{padding:"4px 0",color:Z.tx3}}>{i+1}</td>
+          <td style={{padding:"4px 0",textAlign:"right",fontFamily:Z.mn,color:Z.gn}}>{fB(b.amount)}</td>
+          <td style={{padding:"4px 0",textAlign:"right",color:Z.tx3}}>{fD(b.date)}</td>
+          <td style={{padding:"4px 0",textAlign:"center"}}><button onClick={()=>removeBaixa(i)} style={{background:"none",border:"none",color:Z.rd,fontSize:10,cursor:"pointer",padding:"2px 4px"}}>✕</button></td>
+        </tr>))}</tbody>
+      </table>)}
+      {showAddBx?(<div style={{padding:10,background:Z.cd2,borderRadius:8,border:`1px solid ${Z.bd2}`,animation:"fi .15s ease"}}>
+        <div className="g3f">
+          <div><label style={{fontSize:8,color:Z.tx3,display:"block",marginBottom:1}}>Valor (R$)</label>
+            <div style={{position:"relative"}}><span style={{position:"absolute",left:6,top:"50%",transform:"translateY(-50%)",fontSize:9,color:Z.tx3}}>R$</span><input value={bxAmt} onChange={e=>{setBxAmt(maskMoney(e.target.value));setBxErr(p=>({...p,amt:undefined}));}} placeholder="0,00" inputMode="decimal" style={{...(bxErr.amt?bxIe:bxIs),paddingLeft:22}}/></div>
+            {bxErr.amt&&<div style={bxES}>{bxErr.amt}</div>}
+          </div>
+          <div><label style={{fontSize:8,color:Z.tx3,display:"block",marginBottom:1}}>Data Pgto</label>
+            <input value={bxDate} onChange={e=>{setBxDate(maskDate(e.target.value));setBxErr(p=>({...p,date:undefined}));}} placeholder="dd/MM/aaaa" maxLength={10} inputMode="numeric" style={bxErr.date?bxIe:bxIs}/>
+            {bxErr.date&&<div style={bxES}>{bxErr.date}</div>}
+          </div>
+          <div style={{display:"flex",gap:4}}>
+            <button onClick={addBaixa} style={{background:`linear-gradient(135deg,${Z.ac3},${Z.ac2})`,color:"#fff",border:"none",borderRadius:5,padding:"6px 12px",fontSize:9,fontWeight:600,cursor:"pointer"}}>Registrar</button>
+            <button onClick={()=>{setShowAddBx(false);setBxErr({});}} style={{background:Z.bd,color:Z.tx3,border:"none",borderRadius:5,padding:"6px 8px",fontSize:9,cursor:"pointer"}}>✕</button>
+          </div>
+        </div>
+      </div>):(<button onClick={()=>{setShowAddBx(true);setBxAmt("");setBxDate("");setBxErr({});}} style={{background:`${Z.ac3}20`,color:Z.ac,border:`1px solid ${Z.ac3}40`,borderRadius:6,padding:"6px 14px",fontSize:10,fontWeight:600,cursor:"pointer",width:"100%"}}>+ Registrar Baixa</button>)}
+    </div>
+
+    <div style={{background:Z.cd,border:`1px solid ${Z.bd}`,borderRadius:10,padding:18,marginBottom:18}}>
+      <div style={{fontSize:11,fontWeight:600,color:Z.ac,marginBottom:14}}>Evolução da Fatura</div>
+      <div className="chart-wrap" style={{display:"flex",alignItems:"flex-end",gap:1,height:140,justifyContent:"center"}}>
+        {cms.map(m=>{const v=mt[m]||0;const h=Math.max(3,(v/mx)*120);const s=m===sm;const p=pmk(m);return(<div key={m} onClick={()=>{setSm(m);setSelLoja(null);setShowAddBx(false);}} style={{flex:"1 1 0",maxWidth:60,display:"flex",flexDirection:"column",alignItems:"center",cursor:"pointer"}}><span style={{fontSize:8,color:s?Z.ac:Z.tx3,marginBottom:2,fontFamily:Z.mn}}>{v>999?`${(v/1e3).toFixed(0)}k`:v.toFixed(0)}</span><div style={{width:"80%",height:h,background:s?`linear-gradient(180deg,${Z.ac2},${Z.ac3})`:`linear-gradient(180deg,${Z.bd2},${Z.bd})`,borderRadius:"4px 4px 1px 1px",border:s?`1px solid ${Z.ac}`:`1px solid ${Z.bd}`,boxShadow:s?`0 0 10px ${Z.ac3}40`:"none",transition:"all .25s"}}/><span style={{fontSize:8,color:s?Z.tx:Z.tx3,marginTop:2}}>{p?`${MS[p.month]}/${String(p.year).slice(2)}`:""}</span></div>);})}
+      </div>
+    </div>
+    <div className="g2">
+      <div style={{background:Z.cd,border:`1px solid ${Z.bd}`,borderRadius:10,padding:16}}>
+        <div style={{fontSize:11,fontWeight:600,color:Z.ac,marginBottom:12}}>Top Lojas — {sm}</div>
+        {!ts.length&&<div style={{color:Z.tx3,fontSize:11}}>Nenhuma parcela</div>}
+        {ts.map(([l,t],i)=>(<div key={l} onClick={()=>setSelLoja(selLoja===l?null:l)} style={{display:"flex",alignItems:"center",gap:7,marginBottom:4,padding:"5px 6px",borderRadius:6,cursor:"pointer",background:selLoja===l?`${Z.ac3}20`:"transparent",border:selLoja===l?`1px solid ${Z.ac3}40`:"1px solid transparent",transition:"all .15s"}}>
+          <span style={{width:18,height:18,borderRadius:4,background:selLoja===l?Z.ac2:i===0?Z.ac3:Z.bd,color:selLoja===l||i===0?"#fff":Z.tx3,display:"flex",alignItems:"center",justifyContent:"center",fontSize:9,fontWeight:700}}>{i+1}</span>
+          <span style={{flex:1,fontSize:11,fontWeight:selLoja===l?600:500,color:selLoja===l?Z.ac:Z.tx}}>{l}</span>
+          <span style={{fontSize:11,fontWeight:600,fontFamily:Z.mn,color:Z.ac}}>{fB(t)}</span>
+        </div>))}
+      </div>
+      <div style={{background:Z.cd,border:`1px solid ${Z.bd}`,borderRadius:10,padding:16}}>
+        {selLoja?(<>
+          <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:12}}>
+            <div style={{fontSize:11,fontWeight:600,color:Z.ac}}>{selLoja} — {sm}</div>
+            <button onClick={()=>setSelLoja(null)} style={{background:Z.bd,color:Z.tx3,border:"none",borderRadius:4,padding:"3px 8px",fontSize:9,cursor:"pointer"}}>✕ Fechar</button>
+          </div>
+          <div style={{maxHeight:220,overflowY:"auto"}}>
+            {lojaPurchases.map(p=>{const mk=Object.keys(p.monthly);const pastCount=mk.filter(m=>MO.indexOf(m)<MO.indexOf(sm)).length;return(<div key={p.id} style={{padding:"7px 0",borderBottom:`1px solid ${Z.bd}`}}>
+              <div style={{display:"flex",justifyContent:"space-between",fontSize:11}}>
+                <span style={{fontWeight:600}}>{fD(p.data)}</span>
+                <span style={{fontFamily:Z.mn,color:Z.ac,fontWeight:600}}>{fB(p.monthly[sm])}</span>
+              </div>
+              <div style={{display:"flex",justifyContent:"space-between",fontSize:9,color:Z.tx3,marginTop:2}}>
+                <span>Total: {fB(p.total)} · {fB(p.total/p.parcelas)}/mês</span>
+                <span style={{color:Z.yl,fontWeight:600}}>Parcela {pastCount+1}/{p.parcelas}</span>
+              </div>
+            </div>);})}
+            <div style={{borderTop:`1px solid ${Z.bd2}`,marginTop:6,paddingTop:6,display:"flex",justifyContent:"space-between",fontSize:11}}>
+              <span style={{color:Z.tx3,fontWeight:600}}>Total {selLoja}</span>
+              <span style={{fontFamily:Z.mn,color:Z.ac,fontWeight:700}}>{fB(lojaPurchases.reduce((s,p)=>s+(p.monthly[sm]||0),0))}</span>
+            </div>
+          </div>
+        </>):(<>
+          <div style={{fontSize:11,fontWeight:600,color:Z.ac,marginBottom:12}}>Parcelas do Mês</div>
+          <div style={{maxHeight:220,overflowY:"auto"}}>{cmp.slice(0,12).map(p=>(<div key={p.id} style={{display:"flex",justifyContent:"space-between",padding:"5px 0",borderBottom:`1px solid ${Z.bd}`,fontSize:11}}><div><span>{p.loja}</span><span style={{color:Z.tx3,marginLeft:5,fontSize:9}}>{p.parcelas}x</span></div><span style={{fontFamily:Z.mn,color:Z.ac}}>{fB(p.monthly[sm])}</span></div>))}{cmp.length>12&&<div style={{color:Z.tx3,fontSize:10,padding:"4px 0"}}>+{cmp.length-12} mais</div>}</div>
+        </>)}
+      </div>
+    </div>
+  </div>);
+}
+
+function Purch({ps,setPs,sr,setSr,setEp}){
+  const[so,setSo]=useState("date-desc");const[fl,setFl]=useState("");const[ex,setEx]=useState(null);
+  const curIdx=MO.indexOf(cmk());
+  const ls=useMemo(()=>[...new Set(ps.map(p=>p.loja))].sort(),[ps]);
+  /* Filtra apenas compras com parcelas do mês corrente em diante */
+  const fd=useMemo(()=>{let l=ps.filter(p=>{const mk=Object.keys(p.monthly);return mk.some(m=>MO.indexOf(m)>=curIdx);});if(sr)l=l.filter(p=>p.loja.toLowerCase().includes(sr.toLowerCase()));if(fl)l=l.filter(p=>p.loja===fl);if(so==="date-desc")l.sort((a,b)=>(b.id||0)-(a.id||0));else if(so==="date-asc")l.sort((a,b)=>(a.id||0)-(b.id||0));else if(so==="total-desc")l.sort((a,b)=>b.total-a.total);else l.sort((a,b)=>a.total-b.total);return l;},[ps,sr,fl,so,curIdx]);
+  const is={width:"100%",background:Z.cd,border:`1px solid ${Z.bd}`,borderRadius:6,padding:"8px 8px 8px 28px",color:Z.tx,fontSize:11,boxSizing:"border-box",fontFamily:Z.ft};
+  const ss={background:Z.cd,border:`1px solid ${Z.bd}`,borderRadius:6,padding:"8px 9px",color:Z.tx,fontSize:11,fontFamily:Z.ft};
+  return(<div>
+    <div style={{display:"flex",gap:8,marginBottom:14,flexWrap:"wrap"}}><div style={{position:"relative",flex:"1 1 160px"}}><span style={{position:"absolute",left:8,top:"50%",transform:"translateY(-50%)",color:Z.tx3,fontSize:13}}>🔍</span><input value={sr} onChange={e=>setSr(e.target.value)} placeholder="Buscar loja..." style={is}/></div><select value={fl} onChange={e=>setFl(e.target.value)} style={ss}><option value="">Todas as lojas</option>{ls.map(l=><option key={l} value={l}>{l}</option>)}</select><select value={so} onChange={e=>setSo(e.target.value)} style={ss}><option value="date-desc">Recentes</option><option value="date-asc">Antigas</option><option value="total-desc">Maior valor</option><option value="total-asc">Menor valor</option></select></div>
+    <div style={{fontSize:10,color:Z.tx3,marginBottom:8}}>{fd.length} compras ativas — Restante: <span style={{color:Z.ac,fontFamily:Z.mn}}>{fB(fd.reduce((s,p)=>{let t=0;Object.entries(p.monthly).forEach(([m,v])=>{if(MO.indexOf(m)>=curIdx)t+=v;});return s+t;},0))}</span></div>
+    <div style={{display:"flex",flexDirection:"column",gap:5}}>{fd.map(p=>{const mk=Object.keys(p.monthly);const futureMonths=mk.filter(m=>MO.indexOf(m)>=curIdx);const pastCount=mk.filter(m=>MO.indexOf(m)<curIdx).length;const curParc=pastCount+1;const pr=p.parcelas>0?Math.min((mk.length/p.parcelas)*100,100):0;const paidVal=mk.filter(m=>MO.indexOf(m)<curIdx).reduce((s,m)=>s+(p.monthly[m]||0),0);const prVal=p.total>0?Math.min((paidVal/p.total)*100,100):0;const ie=ex===p.id;
+    return(<div key={p.id} style={{background:Z.cd,border:`1px solid ${Z.bd}`,borderRadius:8,overflow:"hidden"}}>
+      <div onClick={()=>setEx(ie?null:p.id)} style={{padding:"11px 12px",cursor:"pointer",display:"flex",alignItems:"center",gap:9}}>
+        <div style={{width:34,height:34,borderRadius:7,background:Z.cd2,display:"flex",alignItems:"center",justifyContent:"center",fontSize:12,fontWeight:700,color:"#818cf8",flexShrink:0}}>{p.loja.charAt(0)}</div>
+        <div style={{flex:1,minWidth:0}}>
+          <div style={{display:"flex",justifyContent:"space-between",alignItems:"baseline"}}><span style={{fontSize:12,fontWeight:600}}>{p.loja}</span><span style={{fontSize:12,fontWeight:700,fontFamily:Z.mn,color:Z.ac}}>{fB(p.total)}</span></div>
+          <div style={{display:"flex",justifyContent:"space-between",marginTop:2}}><span style={{fontSize:9,color:Z.tx3}}>{fD(p.data)} · {fB(p.total/p.parcelas)}/mês</span><span style={{fontSize:9,color:pr>=100?Z.gn:Z.yl,fontWeight:600}}>{curParc}/{p.parcelas}</span></div>
+          <div style={{display:"flex",gap:6,marginTop:5,alignItems:"center"}}>
+            <div style={{flex:1}}>
+              <div style={{display:"flex",justifyContent:"space-between",marginBottom:2}}><span style={{fontSize:7,color:Z.tx3}}>Parcelas</span><span style={{fontSize:7,color:Z.tx3}}>{Math.round(pr)}%</span></div>
+              <div style={{height:3,background:Z.bd,borderRadius:2}}><div style={{height:"100%",background:pr>=100?Z.gn:`linear-gradient(90deg,${Z.ac3},${Z.ac2})`,borderRadius:2,width:`${pr}%`,transition:"width .3s"}}/></div>
+            </div>
+            <div style={{flex:1}}>
+              <div style={{display:"flex",justifyContent:"space-between",marginBottom:2}}><span style={{fontSize:7,color:Z.tx3}}>Valor</span><span style={{fontSize:7,color:Z.tx3}}>{fB(paidVal)} / {fB(p.total)}</span></div>
+              <div style={{height:3,background:Z.bd,borderRadius:2}}><div style={{height:"100%",background:prVal>=100?"#2dd4bf":`linear-gradient(90deg,#0d9488,#2dd4bf)`,borderRadius:2,width:`${prVal}%`,transition:"width .3s"}}/></div>
+            </div>
+          </div>
+        </div>
+        <span style={{transform:ie?"rotate(180deg)":"rotate(0)",transition:"transform .2s",color:Z.tx3,fontSize:10}}>▼</span>
+      </div>
+      {ie&&(<div style={{padding:"0 12px 10px",borderTop:`1px solid ${Z.bd}`,animation:"fi .15s ease"}}>
+        <div style={{display:"flex",gap:5,margin:"8px 0 5px",justifyContent:"flex-end"}}>
+          <button onClick={e=>{e.stopPropagation();setEp(p);}} style={{background:Z.bd,color:Z.ac,border:"none",borderRadius:4,padding:"4px 9px",fontSize:9,cursor:"pointer"}}>Editar</button>
+          <button onClick={e=>{e.stopPropagation();if(confirm("Excluir?"))setPs(v=>v.filter(x=>x.id!==p.id));}} style={{background:"#1a1015",color:Z.rd,border:"none",borderRadius:4,padding:"4px 9px",fontSize:9,cursor:"pointer"}}>Excluir</button>
+        </div>
+        <table style={{width:"100%",fontSize:10,borderCollapse:"collapse"}}><thead><tr style={{color:Z.tx3}}><th style={{textAlign:"left",padding:"4px 0",fontWeight:500}}>Mês</th><th style={{textAlign:"right",padding:"4px 0",fontWeight:500}}>Valor</th><th style={{textAlign:"center",padding:"4px 0",fontWeight:500}}>Parcela</th></tr></thead><tbody>{futureMonths.map((m)=>{const allIdx=mk.indexOf(m);return(<tr key={m} style={{borderTop:`1px solid ${Z.bd}`,background:m===cmk()?`${Z.ac3}15`:"transparent"}}><td style={{padding:"4px 0",color:m===cmk()?Z.ac:Z.tx}}>{m}{m===cmk()?" ←":""}</td><td style={{padding:"4px 0",textAlign:"right",fontFamily:Z.mn,color:Z.ac}}>{fB(p.monthly[m])}</td><td style={{padding:"4px 0",textAlign:"center",color:Z.tx3,fontWeight:m===cmk()?600:400}}>{allIdx+1}/{p.parcelas}</td></tr>);})}</tbody></table>
+      </div>)}
+    </div>);})}</div>
+  </div>);
+}
+
+function maskMoney(v){
+  let d=v.replace(/[^\d,]/g,"");
+  const parts=d.split(",");
+  if(parts.length>2)d=parts[0]+","+parts.slice(1).join("");
+  if(parts.length===2&&parts[1].length>2)d=parts[0]+","+parts[1].slice(0,2);
+  const intPart=d.split(",")[0].replace(/\D/g,"");
+  const decPart=d.includes(",")?","+d.split(",")[1]:"";
+  if(!intPart&&!decPart)return"";
+  const formatted=intPart.replace(/\B(?=(\d{3})+(?!\d))/g,".");
+  return formatted+decPart;
+}
+function parseMoney(v){const n=v.replace(/\./g,"").replace(",",".");const f=parseFloat(n);return isNaN(f)?0:f;}
+function maskInt(v){const d=v.replace(/\D/g,"");return d===""?"":String(Math.max(1,Math.min(48,parseInt(d)||1)));}
+function isValidDate(v){if(!v||v.length!==10)return false;const[dd,mm,yy]=v.split("/");const d=parseInt(dd),m=parseInt(mm),y=parseInt(yy);if(isNaN(d)||isNaN(m)||isNaN(y))return false;if(m<1||m>12||d<1||d>31||y<2020||y>2040)return false;const dt=new Date(y,m-1,d);return dt.getFullYear()===y&&dt.getMonth()===m-1&&dt.getDate()===d;}
+
+function Frm({purchase:pu,onClose,onSave}){
+  const initTotal=pu?.total?maskMoney(pu.total.toFixed(2).replace(".",",")):"";
+  const[lj,setLj]=useState(pu?.loja||"");
+  const[tt,setTt]=useState(initTotal);
+  const[pc,setPc]=useState(pu?.parcelas?.toString()||"1");
+  const[dt,setDt]=useState(pu?.data?fD(pu.data):"");
+  const[errors,setErrors]=useState({});
+  const startM=calcStartMonth(dt);
+
+  const validate=()=>{
+    const e={};
+    if(!lj.trim())e.lj="Informe a loja";
+    if(!tt||parseMoney(tt)<=0)e.tt="Informe um valor válido";
+    const pv=parseInt(pc);if(!pc||isNaN(pv)||pv<1)e.pc="Mínimo 1 parcela";
+    if(!dt)e.dt="Informe a data";
+    else if(!isValidDate(dt))e.dt="Data inválida (dd/MM/aaaa)";
+    setErrors(e);return Object.keys(e).length===0;
+  };
+
+  const go=()=>{
+    if(!validate())return;
+    const tv=parseMoney(tt);const pv=parseInt(pc)||1;const vp=Math.round((tv/pv)*100)/100;
+    const si=MO.indexOf(startM);const m={};for(let i=0;i<pv&&si+i<MO.length;i++)m[MO[si+i]]=vp;
+    onSave({loja:lj.trim(),total:tv,parcelas:pv,data:dt||null,monthly:m});
+  };
+
+  const is={width:"100%",background:Z.cd2,border:`1px solid ${Z.bd}`,borderRadius:6,padding:"8px 10px",color:Z.tx,fontSize:12,boxSizing:"border-box",fontFamily:Z.ft};
+  const ie={...is,borderColor:Z.rd};
+  const eStyle={fontSize:9,color:Z.rd,marginTop:2};
+  const tvNum=parseMoney(tt);const pvNum=parseInt(pc)||1;
+
+  return(<div onClick={onClose} style={{position:"fixed",inset:0,background:"rgba(0,0,0,.75)",display:"flex",alignItems:"center",justifyContent:"center",zIndex:100,backdropFilter:"blur(5px)"}}>
+    <div onClick={e=>e.stopPropagation()} className="modal-inner" style={{background:Z.cd,border:`1px solid ${Z.bd2}`,borderRadius:13,padding:22,width:"90%",maxWidth:400,animation:"fi .2s ease"}}>
+      <h2 style={{margin:"0 0 16px",fontSize:15,fontWeight:600}}>{pu?"Editar Compra":"Nova Compra"}</h2>
+      <div style={{display:"flex",flexDirection:"column",gap:10}}>
+        <div><label style={{fontSize:10,color:Z.tx3,display:"block",marginBottom:2}}>Loja</label><input value={lj} onChange={e=>{setLj(e.target.value);setErrors(p=>({...p,lj:undefined}));}} placeholder="Nome da loja" style={errors.lj?ie:is}/>{errors.lj&&<div style={eStyle}>{errors.lj}</div>}</div>
+        <div className="g2f">
+          <div><label style={{fontSize:10,color:Z.tx3,display:"block",marginBottom:2}}>Valor Total (R$)</label>
+            <div style={{position:"relative"}}>
+              <span style={{position:"absolute",left:8,top:"50%",transform:"translateY(-50%)",fontSize:11,color:Z.tx3}}>R$</span>
+              <input value={tt} onChange={e=>{setTt(maskMoney(e.target.value));setErrors(p=>({...p,tt:undefined}));}} placeholder="0,00" inputMode="decimal" style={{...(errors.tt?ie:is),paddingLeft:28}}/>
+            </div>
+            {errors.tt&&<div style={eStyle}>{errors.tt}</div>}
+          </div>
+          <div><label style={{fontSize:10,color:Z.tx3,display:"block",marginBottom:2}}>Nº Parcelas</label>
+            <input value={pc} onChange={e=>{const v=e.target.value.replace(/\D/g,"");setPc(v===""?"":String(Math.min(48,parseInt(v)||1)));setErrors(p=>({...p,pc:undefined}));}} inputMode="numeric" placeholder="1" style={errors.pc?ie:is}/>
+            {errors.pc&&<div style={eStyle}>{errors.pc}</div>}
+          </div>
+        </div>
+        <div className="g2f">
+          <div><label style={{fontSize:10,color:Z.tx3,display:"block",marginBottom:2}}>Data da Compra</label>
+            <input value={dt} onChange={e=>{setDt(maskDate(e.target.value));setErrors(p=>({...p,dt:undefined}));}} placeholder="dd/MM/aaaa" maxLength={10} inputMode="numeric" style={errors.dt?ie:is}/>
+            {errors.dt&&<div style={eStyle}>{errors.dt}</div>}
+          </div>
+          <div><label style={{fontSize:10,color:Z.tx3,display:"block",marginBottom:2}}>Início das Parcelas</label><input value={dt&&dt.length===10&&isValidDate(dt)?startM:"—"} readOnly disabled style={{...is,opacity:.7,cursor:"not-allowed",background:Z.bd}}/><div style={{fontSize:8,color:Z.tx3,marginTop:2}}>{!dt||dt.length<10?"Preencha a data":""}{dt&&dt.length===10&&isValidDate(dt)&&parseInt(dt.split("/")[0])<=18?"Até dia 18 → mês corrente":""}{dt&&dt.length===10&&isValidDate(dt)&&parseInt(dt.split("/")[0])>18?"Após dia 18 → mês seguinte":""}{dt&&dt.length===10&&!isValidDate(dt)?<span style={{color:Z.rd}}>Data inválida</span>:""}</div></div>
+        </div>
+        {tvNum>0&&pvNum>=1&&<div style={{background:Z.cd2,borderRadius:6,padding:9,fontSize:11,display:"flex",justifyContent:"space-between"}}><span><span style={{color:Z.tx3}}>Parcela: </span><span style={{color:Z.ac,fontWeight:600,fontFamily:Z.mn}}>{fB(tvNum/pvNum)}</span></span><span style={{color:Z.tx3}}>{pvNum}x</span></div>}
+      </div>
+      <div style={{display:"flex",gap:7,marginTop:16,justifyContent:"flex-end"}}>
+        <button onClick={onClose} style={{background:Z.bd,color:Z.tx,border:"none",borderRadius:6,padding:"8px 16px",fontSize:11,cursor:"pointer"}}>Cancelar</button>
+        <button onClick={go} style={{background:`linear-gradient(135deg,${Z.ac3},${Z.ac2})`,color:"#fff",border:"none",borderRadius:6,padding:"8px 16px",fontSize:11,fontWeight:600,cursor:"pointer"}}>Salvar</button>
+      </div>
+    </div>
+  </div>);
+}
+
+function Ppl({ppl,setPpl}){
+  const[ex,setEx]=useState(null);
+  const[addPay,setAddPay]=useState(null); // {person,itemIdx}
+  const[payMonth,setPayMonth]=useState("");
+  const[payAmt,setPayAmt]=useState("");
+  const[payDate,setPayDate]=useState("");
+  const[payErr,setPayErr]=useState({});
+
+  const tp=Object.values(ppl).flat().reduce((s,i)=>s+i.payments.reduce((a,p)=>a+p.amount,0),0);
+  const tr=Object.values(ppl).flat().reduce((s,i)=>s+(i.remaining||0),0);
+
+  const addPayment=(person,itemIdx)=>{
+    const e={};
+    if(!payMonth.trim())e.month="Informe o mês";
+    const amt=parseMoney(payAmt);
+    if(!payAmt||amt<=0)e.amt="Valor inválido";
+    if(!payDate)e.date="Informe a data";
+    else if(!isValidDate(payDate))e.date="Data inválida";
+    setPayErr(e);
+    if(Object.keys(e).length>0)return;
+
+    setPpl(prev=>{
+      const updated={...prev};
+      const items=[...updated[person]];
+      const item={...items[itemIdx]};
+      const newPayments=[...item.payments,{month:payMonth.trim(),amount:amt,date:payDate}];
+      const totalPaid=newPayments.reduce((s,p)=>s+p.amount,0);
+      item.payments=newPayments;
+      item.remaining=Math.max(0,Math.round((item.total-totalPaid)*100)/100);
+      items[itemIdx]=item;
+      updated[person]=items;
+      return updated;
+    });
+    setAddPay(null);setPayMonth("");setPayAmt("");setPayDate("");setPayErr({});
+  };
+
+  const is={width:"100%",background:Z.cd2,border:`1px solid ${Z.bd}`,borderRadius:5,padding:"6px 8px",color:Z.tx,fontSize:11,boxSizing:"border-box",fontFamily:Z.ft};
+  const ie={...is,borderColor:Z.rd};
+  const eS={fontSize:8,color:Z.rd,marginTop:1};
+
+  return(<div>
+    <div style={{display:"flex",gap:10,marginBottom:18,flexWrap:"wrap"}}><St label="Total Pago" value={fB(tp)} color={Z.gn}/><St label="Restante" value={fB(tr)} color={tr>0?Z.yl:Z.gn}/></div>
+    {Object.entries(ppl).map(([n,its])=>{const pp=its.reduce((s,i)=>s+i.payments.reduce((a,p)=>a+p.amount,0),0);const pr=its.reduce((s,i)=>s+(i.remaining||0),0);const isEx=ex===n;
+    return(<div key={n} style={{background:Z.cd,border:`1px solid ${Z.bd}`,borderRadius:10,marginBottom:8,overflow:"hidden"}}>
+      <div onClick={()=>setEx(isEx?null:n)} style={{padding:"12px 16px",cursor:"pointer",display:"flex",alignItems:"center",justifyContent:"space-between"}}>
+        <div style={{display:"flex",alignItems:"center",gap:9}}><div style={{width:36,height:36,borderRadius:"50%",background:pr===0?Z.gn:`linear-gradient(135deg,${Z.ac3},${Z.ac2})`,display:"flex",alignItems:"center",justifyContent:"center",fontSize:14,fontWeight:700,color:"#fff"}}>{n.charAt(0)}</div><div><div style={{fontSize:13,fontWeight:600}}>{n}</div><div style={{fontSize:10,color:Z.tx3}}>{its.length} {its.length===1?"item":"itens"}</div></div></div>
+        <div style={{textAlign:"right"}}><div style={{fontSize:12,fontWeight:600,fontFamily:Z.mn,color:pr===0?Z.gn:Z.yl}}>{pr===0?"Quitado ✓":fB(pr)}</div><div style={{fontSize:9,color:Z.tx3}}>Pago: {fB(pp)}</div></div>
+      </div>
+      {isEx&&its.map((it,idx)=>{
+        const itemPaid=it.payments.reduce((s,p)=>s+p.amount,0);
+        const isAddingHere=addPay&&addPay.person===n&&addPay.itemIdx===idx;
+        return(<div key={idx} style={{padding:"9px 16px",borderTop:`1px solid ${Z.bd}`,animation:"fi .15s ease"}}>
+        <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:5}}>
+          <span style={{fontSize:12,fontWeight:600,color:Z.ac}}>{it.item}</span>
+          <div style={{display:"flex",alignItems:"center",gap:8}}>
+            <span style={{fontSize:12,fontFamily:Z.mn}}>{fB(it.total)}</span>
+          </div>
+        </div>
+        <table style={{width:"100%",fontSize:10,borderCollapse:"collapse"}}><thead><tr style={{color:Z.tx3}}><th style={{textAlign:"left",padding:"3px 0"}}>Mês</th><th style={{textAlign:"right",padding:"3px 0"}}>Valor</th><th style={{textAlign:"right",padding:"3px 0"}}>Data</th></tr></thead><tbody>{it.payments.map((p,i)=>(<tr key={i} style={{borderTop:`1px solid ${Z.bd}`}}><td style={{padding:"3px 0"}}>{p.month}</td><td style={{padding:"3px 0",textAlign:"right",fontFamily:Z.mn,color:Z.gn}}>{fB(p.amount)}</td><td style={{padding:"3px 0",textAlign:"right",color:Z.tx3}}>{fD(p.date)}</td></tr>))}</tbody></table>
+        <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",marginTop:6,paddingTop:6,borderTop:`1px solid ${Z.bd2}`}}>
+          <div style={{fontSize:10}}><span style={{color:Z.tx3}}>Pago: {fB(itemPaid)}</span><span style={{color:Z.tx3,margin:"0 6px"}}>·</span><span style={{color:it.remaining===0?Z.gn:Z.yl,fontWeight:600}}>Resta: {fB(it.remaining)}</span></div>
+          {it.remaining>0&&!isAddingHere&&<button onClick={()=>{setAddPay({person:n,itemIdx:idx});setPayMonth("");setPayAmt("");setPayDate("");setPayErr({});}} style={{background:`${Z.ac3}30`,color:Z.ac,border:`1px solid ${Z.ac3}50`,borderRadius:5,padding:"4px 10px",fontSize:9,fontWeight:600,cursor:"pointer"}}>+ Baixa</button>}
+        </div>
+        {isAddingHere&&(<div style={{marginTop:8,padding:10,background:Z.cd2,borderRadius:8,border:`1px solid ${Z.bd2}`,animation:"fi .15s ease"}}>
+          <div style={{fontSize:10,fontWeight:600,color:Z.ac,marginBottom:8}}>Nova Baixa — {it.item}</div>
+          <div className="g3t">
+            <div><label style={{fontSize:8,color:Z.tx3,display:"block",marginBottom:1}}>Mês/Ref.</label><input value={payMonth} onChange={e=>{setPayMonth(e.target.value);setPayErr(p=>({...p,month:undefined}));}} placeholder="Ex: Março/2026" style={payErr.month?ie:is}/>{payErr.month&&<div style={eS}>{payErr.month}</div>}</div>
+            <div><label style={{fontSize:8,color:Z.tx3,display:"block",marginBottom:1}}>Valor (R$)</label>
+              <div style={{position:"relative"}}><span style={{position:"absolute",left:6,top:"50%",transform:"translateY(-50%)",fontSize:9,color:Z.tx3}}>R$</span><input value={payAmt} onChange={e=>{setPayAmt(maskMoney(e.target.value));setPayErr(p=>({...p,amt:undefined}));}} placeholder="0,00" inputMode="decimal" style={{...(payErr.amt?ie:is),paddingLeft:22}}/></div>
+              {payErr.amt&&<div style={eS}>{payErr.amt}</div>}
+            </div>
+            <div><label style={{fontSize:8,color:Z.tx3,display:"block",marginBottom:1}}>Data Pgto</label><input value={payDate} onChange={e=>{setPayDate(maskDate(e.target.value));setPayErr(p=>({...p,date:undefined}));}} placeholder="dd/MM/aaaa" maxLength={10} inputMode="numeric" style={payErr.date?ie:is}/>{payErr.date&&<div style={eS}>{payErr.date}</div>}</div>
+          </div>
+          <div style={{display:"flex",gap:5,marginTop:8,justifyContent:"flex-end"}}>
+            <button onClick={()=>setAddPay(null)} style={{background:Z.bd,color:Z.tx3,border:"none",borderRadius:4,padding:"5px 12px",fontSize:9,cursor:"pointer"}}>Cancelar</button>
+            <button onClick={()=>addPayment(n,idx)} style={{background:`linear-gradient(135deg,${Z.ac3},${Z.ac2})`,color:"#fff",border:"none",borderRadius:4,padding:"5px 12px",fontSize:9,fontWeight:600,cursor:"pointer"}}>Registrar Baixa</button>
+          </div>
+        </div>)}
+      </div>);})}
+    </div>);})}
+  </div>);
+}
+
+function BaixasView({baixas,setBaixas,mt,am}){
+  const[selM,setSelM]=useState(cmk());
+  const[showAdd,setShowAdd]=useState(false);
+  const[bAmt,setBAmt]=useState("");
+  const[bDate,setBDate]=useState("");
+  const[bErr,setBErr]=useState({});
+
+  const mBx=baixas[selM]||[];
+  const totalBx=mBx.reduce((s,b)=>s+b.amount,0);
+  const prov=mt[selM]||0;
+  const saldoMes=totalBx-prov;
+
+  // Saldo acumulado para o mês selecionado
+  const calcAcum=(targetM)=>{
+    if(SEED_ACUM[targetM]!==undefined){
+      return SEED_ACUM[targetM];
+    }
+    const lastSeedM="Fevereiro/2026";
+    const lsi=MO.indexOf(lastSeedM);
+    const ti=MO.indexOf(targetM);
+    if(ti<=lsi)return 0;
+    let a=SEED_ACUM[lastSeedM]||0;
+    for(let i=lsi+1;i<=ti;i++){
+      const m=MO[i];if(!m)break;
+      const p=mt[m]||0;
+      const tb=(baixas[m]||[]).reduce((s,b)=>s+b.amount,0);
+      a+=(tb-p);
+    }
+    return Math.round(a*100)/100;
+  };
+  const saldoAcum=calcAcum(selM);
+
+  const addBx=()=>{
+    const e={};
+    const amt=parseMoney(bAmt);
+    if(!bAmt||amt<=0)e.amt="Valor inválido";
+    if(!bDate)e.date="Informe a data";
+    else if(!isValidDate(bDate))e.date="Data inválida";
+    setBErr(e);
+    if(Object.keys(e).length>0)return;
+    setBaixas(prev=>{const u={...prev};u[selM]=[...(u[selM]||[]),{amount:amt,date:bDate}];return u;});
+    setBAmt("");setBDate("");setShowAdd(false);setBErr({});
+  };
+
+  const remBx=(idx)=>{setBaixas(prev=>{const u={...prev};const l=[...(u[selM]||[])];l.splice(idx,1);u[selM]=l;return u;});};
+
+  // Histórico: ignorar os 4 primeiros meses (sem dados), ordenar desc
+  const skipMonths=new Set(["Abril/2023","Maio/2023","Junho/2023","Julho/2023"]);
+  const allBxMonths=am.filter(m=>!skipMonths.has(m)&&((mt[m]||0)>0||(baixas[m]&&baixas[m].length>0))).reverse();
+
+  const is={width:"100%",background:Z.cd2,border:`1px solid ${Z.bd}`,borderRadius:5,padding:"7px 9px",color:Z.tx,fontSize:11,boxSizing:"border-box",fontFamily:Z.ft};
+  const ie={...is,borderColor:Z.rd};
+  const eS={fontSize:8,color:Z.rd,marginTop:1};
+
+  return(<div>
+    <div className="stat-row" style={{display:"flex",gap:10,flexWrap:"wrap",marginBottom:18}}>
+      <St label="Provisão do Mês" value={fB(prov)} color={Z.ac}/>
+      <St label="Baixas do Mês" value={fB(totalBx)} sub={`${mBx.length} pagamento${mBx.length!==1?"s":""}`} color={Z.gn}/>
+      <St label="Saldo do Mês" value={fB(saldoMes)} sub={saldoMes>=0?"Superávit":"Déficit"} color={saldoMes>=0?Z.gn:Z.yl}/>
+      <St label="Saldo Acumulado" value={fB(saldoAcum)} sub={saldoAcum>=0?"Quitado":"Devedor"} color={saldoAcum>=0?Z.gn:Z.rd}/>
+    </div>
+
+    {/* Seletor de mês + registro */}
+    <div style={{background:Z.cd,border:`1px solid ${Z.bd}`,borderRadius:10,padding:16,marginBottom:18}}>
+      <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:12,flexWrap:"wrap",gap:8}}>
+        <div style={{display:"flex",alignItems:"center",gap:8,flexWrap:"wrap"}}>
+          <div style={{fontSize:12,fontWeight:600,color:Z.ac}}>Baixas</div>
+          <select value={selM} onChange={e=>{setSelM(e.target.value);setShowAdd(false);}} style={{background:Z.cd2,color:Z.tx,border:`1px solid ${Z.bd}`,borderRadius:6,padding:"5px 8px",fontSize:11,fontFamily:Z.ft,cursor:"pointer"}}>{am.map(m=><option key={m} value={m}>{m}</option>)}</select>
+        </div>
+        {!showAdd&&<button onClick={()=>{setShowAdd(true);setBAmt("");setBDate("");setBErr({});}} style={{background:`linear-gradient(135deg,${Z.ac3},${Z.ac2})`,color:"#fff",border:"none",borderRadius:6,padding:"6px 14px",fontSize:10,fontWeight:600,cursor:"pointer"}}>+ Nova Baixa</button>}
+      </div>
+
+      {showAdd&&(<div style={{padding:12,background:Z.cd2,borderRadius:8,border:`1px solid ${Z.bd2}`,marginBottom:12,animation:"fi .15s ease"}}>
+        <div style={{fontSize:10,fontWeight:600,color:Z.ac,marginBottom:8}}>Registrar Baixa — {selM}</div>
+        <div className="g3f">
+          <div><label style={{fontSize:9,color:Z.tx3,display:"block",marginBottom:2}}>Valor (R$)</label>
+            <div style={{position:"relative"}}><span style={{position:"absolute",left:7,top:"50%",transform:"translateY(-50%)",fontSize:10,color:Z.tx3}}>R$</span><input value={bAmt} onChange={e=>{setBAmt(maskMoney(e.target.value));setBErr(p=>({...p,amt:undefined}));}} placeholder="0,00" inputMode="decimal" style={{...(bErr.amt?ie:is),paddingLeft:24}}/></div>
+            {bErr.amt&&<div style={eS}>{bErr.amt}</div>}
+          </div>
+          <div><label style={{fontSize:9,color:Z.tx3,display:"block",marginBottom:2}}>Data do Pagamento</label>
+            <input value={bDate} onChange={e=>{setBDate(maskDate(e.target.value));setBErr(p=>({...p,date:undefined}));}} placeholder="dd/MM/aaaa" maxLength={10} inputMode="numeric" style={bErr.date?ie:is}/>
+            {bErr.date&&<div style={eS}>{bErr.date}</div>}
+          </div>
+          <div style={{display:"flex",gap:4}}>
+            <button onClick={addBx} style={{background:`linear-gradient(135deg,${Z.ac3},${Z.ac2})`,color:"#fff",border:"none",borderRadius:5,padding:"7px 14px",fontSize:10,fontWeight:600,cursor:"pointer"}}>Registrar</button>
+            <button onClick={()=>setShowAdd(false)} style={{background:Z.bd,color:Z.tx3,border:"none",borderRadius:5,padding:"7px 8px",fontSize:10,cursor:"pointer"}}>✕</button>
+          </div>
+        </div>
+      </div>)}
+
+      {/* Baixas do mês selecionado */}
+      {mBx.length>0?(<table style={{width:"100%",fontSize:11,borderCollapse:"collapse"}}>
+        <thead><tr style={{color:Z.tx3}}><th style={{textAlign:"left",padding:"6px 0",fontWeight:500}}>#</th><th style={{textAlign:"right",padding:"6px 0",fontWeight:500}}>Valor Pago</th><th style={{textAlign:"right",padding:"6px 0",fontWeight:500}}>Data</th><th style={{width:30}}></th></tr></thead>
+        <tbody>{mBx.map((b,i)=>(<tr key={i} style={{borderTop:`1px solid ${Z.bd}`}}>
+          <td style={{padding:"6px 0",color:Z.tx3}}>{i+1}</td>
+          <td style={{padding:"6px 0",textAlign:"right",fontFamily:Z.mn,color:Z.gn,fontWeight:600}}>{fB(b.amount)}</td>
+          <td style={{padding:"6px 0",textAlign:"right",color:Z.tx3}}>{b.date?fD(b.date):"—"}</td>
+          <td style={{padding:"6px 0",textAlign:"center"}}><button onClick={()=>remBx(i)} style={{background:"none",border:"none",color:Z.rd,fontSize:11,cursor:"pointer",padding:"2px 4px"}}>✕</button></td>
+        </tr>))}</tbody>
+        <tfoot><tr style={{borderTop:`2px solid ${Z.bd2}`}}>
+          <td style={{padding:"8px 0",fontWeight:600,color:Z.tx3}}>Total</td>
+          <td style={{padding:"8px 0",textAlign:"right",fontFamily:Z.mn,color:Z.gn,fontWeight:700,fontSize:12}}>{fB(totalBx)}</td>
+          <td colSpan={2} style={{padding:"8px 0",textAlign:"right",fontSize:10,color:saldoAcum>=0?Z.gn:Z.yl,fontWeight:600}}>{saldoAcum>=0?"Quitado ✓":`Falta: ${fB(Math.abs(saldoAcum))}`}</td>
+        </tr></tfoot>
+      </table>):(<div style={{color:Z.tx3,fontSize:11,padding:"8px 0"}}>Nenhuma baixa registrada para {selM}</div>)}
+    </div>
+
+    {/* Histórico completo */}
+    <div style={{background:Z.cd,border:`1px solid ${Z.bd}`,borderRadius:10,padding:16}}>
+      <div style={{fontSize:12,fontWeight:600,color:Z.ac,marginBottom:14}}>Histórico de Baixas</div>
+      <div style={{maxHeight:400,overflowY:"auto"}}>
+        <table style={{width:"100%",fontSize:10,borderCollapse:"collapse"}}>
+          <thead style={{position:"sticky",top:0,background:Z.cd}}><tr style={{color:Z.tx3}}>
+            <th style={{textAlign:"left",padding:"6px 0",fontWeight:600}}>Mês</th>
+            <th style={{textAlign:"right",padding:"6px 0",fontWeight:600}}>Provisão</th>
+            <th style={{textAlign:"right",padding:"6px 0",fontWeight:600}}>Baixas</th>
+            <th style={{textAlign:"right",padding:"6px 0",fontWeight:600}}>Saldo Mês</th>
+            <th style={{textAlign:"right",padding:"6px 0",fontWeight:600}}>Saldo Acum.</th>
+            <th style={{textAlign:"center",padding:"6px 0",fontWeight:600}}>Status</th>
+          </tr></thead>
+          <tbody>{(()=>{
+            return allBxMonths.map(m=>{
+              const p=mt[m]||0;
+              const bxList=baixas[m]||[];
+              const tb=bxList.reduce((s,b)=>s+b.amount,0);
+              const sl=tb-p;
+              const slAcum=calcAcum(m);
+              const isCur=m===selM;
+              const isQuitado=slAcum>=0;
+              return(<tr key={m} onClick={()=>{setSelM(m);setShowAdd(false);}} style={{borderTop:`1px solid ${Z.bd}`,cursor:"pointer",background:isCur?`${Z.ac3}15`:"transparent"}}>
+                <td style={{padding:"6px 0",fontWeight:isCur?600:400,color:isCur?Z.ac:Z.tx}}>{m}</td>
+                <td style={{padding:"6px 0",textAlign:"right",fontFamily:Z.mn,color:Z.ac}}>{fB(p)}</td>
+                <td style={{padding:"6px 0",textAlign:"right",fontFamily:Z.mn,color:tb>0?Z.gn:Z.tx3}}>{fB(tb)}</td>
+                <td style={{padding:"6px 0",textAlign:"right",fontFamily:Z.mn,color:sl>=0?Z.gn:Z.yl}}>{fB(sl)}</td>
+                <td style={{padding:"6px 0",textAlign:"right",fontFamily:Z.mn,color:slAcum>=0?Z.gn:Z.rd,fontWeight:600}}>{fB(slAcum)}</td>
+                <td style={{padding:"6px 0",textAlign:"center"}}>{tb===0&&p===0?"":<>{isQuitado?<span style={{color:Z.gn,fontSize:9,fontWeight:600}}>✓ Quitado</span>:tb>0?<span style={{color:Z.yl,fontSize:9}}>Parcial</span>:<span style={{color:Z.rd,fontSize:9}}>Pendente</span>}</>}</td>
+              </tr>);
+            });
+          })()}</tbody>
+        </table>
+      </div>
+    </div>
+  </div>);
+}
+
+function Rpts({ps,mt,am}){
+  const mx=Math.max(...Object.values(mt),1);
+  const sr=useMemo(()=>{const m={};ps.forEach(p=>{m[p.loja]=(m[p.loja]||0)+p.total;});return Object.entries(m).sort((a,b)=>b[1]-a[1]);},[ps]);
+  return(<div>
+    <div style={{background:Z.cd,border:`1px solid ${Z.bd}`,borderRadius:10,padding:18,marginBottom:18}}>
+      <div style={{fontSize:11,fontWeight:600,color:Z.ac,marginBottom:12}}>Histórico Completo</div>
+      <div className="chart-wrap" style={{display:"flex",alignItems:"flex-end",gap:1,height:160,overflowX:"auto",paddingBottom:20}}>
+        {am.filter(m=>mt[m]>0).map(m=>{const v=mt[m]||0;const h=Math.max(3,(v/mx)*140);const p=pmk(m);return(<div key={m} style={{display:"flex",flexDirection:"column",alignItems:"center",minWidth:18,flex:"0 0 auto"}}><span style={{fontSize:6,color:Z.tx3,marginBottom:1,fontFamily:Z.mn}}>{v>999?`${(v/1e3).toFixed(0)}k`:""}</span><div style={{width:14,height:h,background:`linear-gradient(180deg,${Z.ac2},${Z.ac3}80)`,borderRadius:"2px 2px 1px 1px"}} title={`${m}: ${fB(v)}`}/><span style={{fontSize:6,color:Z.tx3,marginTop:1,writingMode:"vertical-rl",transform:"rotate(180deg)",height:32}}>{p?`${MS[p.month]}/${String(p.year).slice(2)}`:""}</span></div>);})}
+      </div>
+    </div>
+    <div className="g2">
+      <div style={{background:Z.cd,border:`1px solid ${Z.bd}`,borderRadius:10,padding:16}}><div style={{fontSize:11,fontWeight:600,color:Z.ac,marginBottom:12}}>Ranking Lojas</div><div style={{maxHeight:360,overflowY:"auto"}}>{sr.map(([l,t],i)=>(<div key={l} style={{marginBottom:7}}><div style={{display:"flex",justifyContent:"space-between",fontSize:10,marginBottom:2}}><span><span style={{color:Z.tx3,marginRight:4}}>{i+1}.</span>{l}</span><span style={{fontFamily:Z.mn,color:Z.ac}}>{fB(t)}</span></div><div style={{height:3,background:Z.bd,borderRadius:1}}><div style={{height:"100%",background:`hsl(${265-i*6},65%,${58-i}%)`,borderRadius:1,width:`${(t/sr[0][1])*100}%`}}/></div></div>))}</div></div>
+      <div style={{background:Z.cd,border:`1px solid ${Z.bd}`,borderRadius:10,padding:16}}><div style={{fontSize:11,fontWeight:600,color:Z.ac,marginBottom:12}}>Resumo Geral</div>
+        {[["Total Compras",ps.length.toString()],["Valor Total",fB(ps.reduce((s,p)=>s+p.total,0))],["Lojas",new Set(ps.map(p=>p.loja)).size.toString()],["Ticket Médio",fB(ps.reduce((s,p)=>s+p.total,0)/ps.length)],["Maior Compra",fB(Math.max(...ps.map(p=>p.total)))],["Média Parcelas",(ps.reduce((s,p)=>s+p.parcelas,0)/ps.length).toFixed(1)+"x"]].map(([l,v])=>(<div key={l} style={{display:"flex",justifyContent:"space-between",padding:"7px 0",borderBottom:`1px solid ${Z.bd}`,fontSize:11}}><span style={{color:Z.tx3}}>{l}</span><span style={{fontWeight:600,fontFamily:Z.mn}}>{v}</span></div>))}
+      </div>
+    </div>
+  </div>);
+}
+
+ReactDOM.createRoot(document.getElementById("root")).render(<App />);
+</script>
+</body>
+</html>
