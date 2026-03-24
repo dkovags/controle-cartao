@@ -199,7 +199,7 @@ function App(){
   const mt=useMemo(()=>{const t={};am.forEach(m=>{t[m]=0;});ps.forEach(p=>Object.entries(p.monthly).forEach(([m,v])=>{t[m]=(t[m]||0)+v;}));return t;},[ps,am]);
   const cmp=useMemo(()=>ps.filter(p=>p.monthly[sm]>0),[ps,sm]);
   const ap=useMemo(()=>ps.filter(p=>{const k=Object.keys(p.monthly);if(!k.length)return true;return MO.indexOf(k[k.length-1])>=MO.indexOf(cmk());}),[ps]);
-  const td=useMemo(()=>{let t=0;const ci=MO.indexOf(cmk());ps.forEach(p=>Object.entries(p.monthly).forEach(([m,v])=>{if(MO.indexOf(m)>=ci)t+=v;}));return t;},[ps]);
+  const td=useMemo(()=>{let prov=0;let bx=0;const ci=MO.indexOf(cmk());ps.forEach(p=>Object.entries(p.monthly).forEach(([m,v])=>{if(MO.indexOf(m)>=ci)prov+=v;}));MO.forEach((m,i)=>{if(i>=ci)(baixas[m]||[]).forEach(b=>{bx+=b.amount;});});return prov-bx;},[ps,baixas]);
 
   const handleLogin=async()=>{setAuthError(null);setAuthLoading(true);const u=await loginGoogle();if(!u)setAuthLoading(false);};
   const handleLogout=async()=>{await logout();setOk(false);setPs([]);setPpl({});setBaixas({});};
