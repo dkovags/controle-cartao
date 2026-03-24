@@ -199,7 +199,7 @@ function App(){
   const mt=useMemo(()=>{const t={};am.forEach(m=>{t[m]=0;});ps.forEach(p=>Object.entries(p.monthly).forEach(([m,v])=>{t[m]=(t[m]||0)+v;}));return t;},[ps,am]);
   const cmp=useMemo(()=>ps.filter(p=>p.monthly[sm]>0),[ps,sm]);
   const ap=useMemo(()=>ps.filter(p=>{const k=Object.keys(p.monthly);if(!k.length)return true;return MO.indexOf(k[k.length-1])>=MO.indexOf(cmk());}),[ps]);
-  const td=useMemo(()=>{let prov=0;let bx=0;const ci=MO.indexOf(cmk());ps.forEach(p=>Object.entries(p.monthly).forEach(([m,v])=>{if(MO.indexOf(m)>=ci)prov+=v;}));MO.forEach((m,i)=>{if(i>=ci)(baixas[m]||[]).forEach(b=>{bx+=b.amount;});});return prov-bx;},[ps,baixas]);
+  const td=useMemo(()=>{let t=0;const ci=MO.indexOf(cmk());ps.forEach(p=>Object.entries(p.monthly).forEach(([m,v])=>{if(MO.indexOf(m)>=ci)t+=v;}));return t;},[ps]);
 
   const handleLogin=async()=>{setAuthError(null);setAuthLoading(true);const u=await loginGoogle();if(!u)setAuthLoading(false);};
   const handleLogout=async()=>{await logout();setOk(false);setPs([]);setPpl({});setBaixas({});};
@@ -308,7 +308,16 @@ function Dash({mt,sm,setSm,cmp,td,ap,am,ps,baixas,setBaixas,isAdmin}){
   // Baixas do mês selecionado
   const mBaixas=(baixas[sm]||[]);
   const totalBaixas=mBaixas.reduce((s,b)=>s+b.amount,0);
-  const saldoMes=c-totalBaixas;
+  // Saldo Mês Acumulado (igual à planilha)
+  const calcAcumDash=(targetM)=>{
+    if(SEED_ACUM[targetM]!==undefined)return SEED_ACUM[targetM];
+    const lsi=MO.indexOf("Fevereiro/2026");const ti=MO.indexOf(targetM);
+    if(ti<=lsi)return 0;
+    let a=SEED_ACUM["Fevereiro/2026"]||0;
+    for(let i=lsi+1;i<=ti;i++){const m=MO[i];if(!m)break;const p=mt[m]||0;const tb=(baixas[m]||[]).reduce((s,b)=>s+b.amount,0);a+=(tb-p);}
+    return Math.round(a*100)/100;
+  };
+  const saldoMesAcum=calcAcumDash(sm);
 
   const addBaixa=()=>{
     const e={};
@@ -335,8 +344,8 @@ function Dash({mt,sm,setSm,cmp,td,ap,am,ps,baixas,setBaixas,isAdmin}){
     <div className="stat-row" style={{display:"flex",gap:10,flexWrap:"wrap",marginBottom:18}}>
       <St label="Fatura do Mês" value={fB(c)} sub={df!==0?`${df>0?"▲":"▼"} ${Math.abs(df).toFixed(1)}%`:null} color={Z.ac}/>
       <St label="Baixas do Mês" value={fB(totalBaixas)} sub={`${mBaixas.length} pagamento${mBaixas.length!==1?"s":""}`} color={Z.gn}/>
-      <St label="Saldo do Mês" value={fB(saldoMes)} sub={saldoMes<=0?"Fatura quitada":"a pagar"} color={saldoMes<=0?Z.gn:Z.rd}/>
-      <St label="Saldo Total" value={fB(td)} sub={td<=0?"Tudo quitado":"a pagar"} color={td<=0?Z.gn:Z.yl}/>
+      <St label="Saldo Mês Acum." value={fB(saldoMesAcum)} sub={saldoMesAcum>=0?"Quitado":"Devedor"} color={saldoMesAcum>=0?Z.gn:Z.rd}/>
+      <St label="Dívida Total" value={fB(td)} sub="parcelas futuras" color={Z.yl}/>
     </div>
 
     {/* Baixas - Controle de Pagamentos */}
@@ -346,7 +355,7 @@ function Dash({mt,sm,setSm,cmp,td,ap,am,ps,baixas,setBaixas,isAdmin}){
         <div className="bx-summary" style={{display:"flex",alignItems:"center",gap:8,flexWrap:"wrap"}}>
           <span style={{fontSize:10,color:Z.tx3}}>Provisão: <span style={{fontFamily:Z.mn,color:Z.ac}}>{fB(c)}</span></span>
           <span style={{fontSize:10,color:Z.tx3}}>Pago: <span style={{fontFamily:Z.mn,color:Z.gn}}>{fB(totalBaixas)}</span></span>
-          <span style={{fontSize:10,fontWeight:600,color:saldoMes<=0?Z.gn:Z.yl}}>Saldo: {fB(saldoMes)}</span>
+          <span style={{fontSize:10,fontWeight:600,color:saldoMesAcum>=0?Z.gn:Z.yl}}>Saldo Acum.: {fB(saldoMesAcum)}</span>
         </div>
       </div>
       {mBaixas.length>0&&(<table style={{width:"100%",fontSize:10,borderCollapse:"collapse",marginBottom:8}}>
