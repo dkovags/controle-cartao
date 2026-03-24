@@ -15,6 +15,7 @@
 <script src="https://www.gstatic.com/firebasejs/10.8.0/firebase-app-compat.js"></script>
 <script src="https://www.gstatic.com/firebasejs/10.8.0/firebase-auth-compat.js"></script>
 <script src="https://www.gstatic.com/firebasejs/10.8.0/firebase-firestore-compat.js"></script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/xlsx/0.18.5/xlsx.full.min.js"></script>
 <script src="https://cdnjs.cloudflare.com/ajax/libs/react/18.2.0/umd/react.production.min.js"></script>
 <script src="https://cdnjs.cloudflare.com/ajax/libs/react-dom/18.2.0/umd/react-dom.production.min.js"></script>
 <script src="https://cdnjs.cloudflare.com/ajax/libs/babel-standalone/7.23.9/babel.min.js"></script>
@@ -30,7 +31,7 @@ const MM={"Janeiro":0,"Fevereiro":1,"Março":2,"Abril":3,"Maio":4,"Junho":5,"Jul
 const MN=["Janeiro","Fevereiro","Março","Abril","Maio","Junho","Julho","Agosto","Setembro","Outubro","Novembro","Dezembro"];
 function pmk(k){if(!k)return null;const p=k.split("/");if(p.length!==2)return null;return{month:MM[p[0]]??0,year:parseInt(p[1])};}
 function cmk(){const n=new Date();return`${MN[n.getMonth()]}/${n.getFullYear()}`;}
-function fB(v){if(v==null||isNaN(v))return"R$ 0,00";return"R$ "+v.toLocaleString("pt-BR",{minimumFractionDigits:2,maximumFractionDigits:2});}
+function fB(v){if(v==null||isNaN(v))return"R$ 0,00";const n=Object.is(v,-0)||Math.abs(v)<0.005?0:v;return"R$ "+n.toLocaleString("pt-BR",{minimumFractionDigits:2,maximumFractionDigits:2});}
 function fD(d){if(!d)return"—";if(d.includes("-")){const p=d.split("-");if(p[0].length===4)return`${p[2]}/${p[1]}/${p[0]}`;}return d;}
 
 function calcStartMonth(dateStr){
@@ -126,6 +127,42 @@ async function sv(d){
 
 const Z={bg:"#080810",cd:"#0e0e1a",cd2:"#13131f",bd:"#1c1c30",bd2:"#262640",tx:"#d8d5cf",tx2:"#7a7a9a",tx3:"#4a4a6a",ac:"#c084fc",ac2:"#a855f7",ac3:"#7c3aed",gn:"#34d399",yl:"#fbbf24",rd:"#f87171",ft:"'Outfit',system-ui,sans-serif",mn:"'JetBrains Mono',monospace"};
 
+function exportXLSX(ps,baixas,ppl){
+  if(typeof XLSX==="undefined"){alert("Biblioteca de exportação não carregada. Recarregue a página.");return;}
+  const wb=XLSX.utils.book_new();
+
+  // Aba Compras
+  const comprasData=ps.map(p=>{
+    const mk=Object.keys(p.monthly);
+    const row={"ID":p.id,"Data":fD(p.data),"Loja":p.loja,"Total":p.total,"Parcelas":p.parcelas,"Valor Parcela":Math.round((p.total/p.parcelas)*100)/100};
+    mk.forEach(m=>{row[m]=p.monthly[m];});
+    return row;
+  });
+  const wsC=XLSX.utils.json_to_sheet(comprasData);
+  XLSX.utils.book_append_sheet(wb,wsC,"Compras");
+
+  // Aba Baixas
+  const baixasData=[];
+  MO.forEach(m=>{
+    const list=baixas[m]||[];
+    if(list.length===0)return;
+    list.forEach((b,i)=>{baixasData.push({"Mês":m,"#":i+1,"Valor":b.amount,"Data":b.date?fD(b.date):"—"});});
+  });
+  if(baixasData.length>0){const wsB=XLSX.utils.json_to_sheet(baixasData);XLSX.utils.book_append_sheet(wb,wsB,"Baixas");}
+
+  // Aba Terceiros
+  const terData=[];
+  Object.entries(ppl).forEach(([nome,itens])=>{
+    itens.forEach(it=>{
+      it.payments.forEach(pay=>{terData.push({"Pessoa":nome,"Item":it.item,"Total Item":it.total,"Mês":pay.month,"Valor Pago":pay.amount,"Data Pgto":pay.date?fD(pay.date):"—","Restante":it.remaining});});
+    });
+  });
+  if(terData.length>0){const wsT=XLSX.utils.json_to_sheet(terData);XLSX.utils.book_append_sheet(wb,wsT,"Terceiros");}
+
+  const hoje=new Date();const ts=`${String(hoje.getDate()).padStart(2,"0")}${String(hoje.getMonth()+1).padStart(2,"0")}${hoje.getFullYear()}`;
+  XLSX.writeFile(wb,`CPC_Export_${ts}.xlsx`);
+}
+
 function App(){
   const[user,setUser]=useState(null);const[role,setRole]=useState(null);const[authLoading,setAuthLoading]=useState(true);const[authError,setAuthError]=useState(null);
   const[ps,setPs]=useState([]);const[ppl,setPpl]=useState({});const[baixas,setBaixas]=useState({});const[ok,setOk]=useState(false);const[saving,setSaving]=useState(false);const[lastUpdate,setLastUpdate]=useState(null);
@@ -162,7 +199,7 @@ function App(){
   const mt=useMemo(()=>{const t={};am.forEach(m=>{t[m]=0;});ps.forEach(p=>Object.entries(p.monthly).forEach(([m,v])=>{t[m]=(t[m]||0)+v;}));return t;},[ps,am]);
   const cmp=useMemo(()=>ps.filter(p=>p.monthly[sm]>0),[ps,sm]);
   const ap=useMemo(()=>ps.filter(p=>{const k=Object.keys(p.monthly);if(!k.length)return true;return MO.indexOf(k[k.length-1])>=MO.indexOf(cmk());}),[ps]);
-  const td=useMemo(()=>{let t=0;const ci=MO.indexOf(cmk());ps.forEach(p=>Object.entries(p.monthly).forEach(([m,v])=>{if(MO.indexOf(m)>=ci)t+=v;}));return t;},[ps]);
+  const td=useMemo(()=>{let prov=0;let bx=0;const ci=MO.indexOf(cmk());ps.forEach(p=>Object.entries(p.monthly).forEach(([m,v])=>{if(MO.indexOf(m)>=ci)prov+=v;}));MO.forEach((m,i)=>{if(i>=ci)(baixas[m]||[]).forEach(b=>{bx+=b.amount;});});return prov-bx;},[ps,baixas]);
 
   const handleLogin=async()=>{setAuthError(null);setAuthLoading(true);const u=await loginGoogle();if(!u)setAuthLoading(false);};
   const handleLogout=async()=>{await logout();setOk(false);setPs([]);setPpl({});setBaixas({});};
@@ -226,6 +263,7 @@ function App(){
         </div>
         {isAdmin&&<button onClick={async()=>{if(!confirm("Resetar dados ao original?"))return;setPs(SEED_P);setPpl(SEED_PPL);setBaixas(SEED_BX);await sv({purchases:SEED_P,people:SEED_PPL,baixas:SEED_BX});tt("Restaurado");}} style={{background:Z.cd2,color:Z.tx2,border:`1px solid ${Z.bd}`,borderRadius:6,padding:"6px 9px",fontSize:10,cursor:"pointer"}}>Resetar</button>}
         {isAdmin&&<button onClick={()=>setSf(true)} style={{background:`linear-gradient(135deg,${Z.ac3},${Z.ac2})`,color:"#fff",border:"none",borderRadius:6,padding:"6px 12px",fontSize:11,fontWeight:600,cursor:"pointer",display:"flex",alignItems:"center",gap:4}}>+ Nova Compra</button>}
+        <button onClick={()=>exportXLSX(ps,baixas,ppl)} style={{background:Z.cd2,color:Z.tx2,border:`1px solid ${Z.bd}`,borderRadius:6,padding:"6px 9px",fontSize:10,cursor:"pointer"}}>Exportar</button>
         <button onClick={handleLogout} style={{background:Z.cd2,color:Z.tx3,border:`1px solid ${Z.bd}`,borderRadius:6,padding:"6px 9px",fontSize:10,cursor:"pointer"}}>Sair</button>
       </div>
     </header>
@@ -298,7 +336,7 @@ function Dash({mt,sm,setSm,cmp,td,ap,am,ps,baixas,setBaixas,isAdmin}){
       <St label="Fatura do Mês" value={fB(c)} sub={df!==0?`${df>0?"▲":"▼"} ${Math.abs(df).toFixed(1)}%`:null} color={Z.ac}/>
       <St label="Baixas do Mês" value={fB(totalBaixas)} sub={`${mBaixas.length} pagamento${mBaixas.length!==1?"s":""}`} color={Z.gn}/>
       <St label="Saldo do Mês" value={fB(saldoMes)} sub={saldoMes<=0?"Fatura quitada":"a pagar"} color={saldoMes<=0?Z.gn:Z.rd}/>
-      <St label="Dívida Total" value={fB(td)} sub="parcelas futuras" color={Z.yl}/>
+      <St label="Saldo Total" value={fB(td)} sub={td<=0?"Tudo quitado":"a pagar"} color={td<=0?Z.gn:Z.yl}/>
     </div>
 
     {/* Baixas - Controle de Pagamentos */}
