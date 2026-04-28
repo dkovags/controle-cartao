@@ -535,45 +535,6 @@ function parseMoney(v){const n=v.replace(/\./g,"").replace(",",".");const f=pars
 function maskInt(v){const d=v.replace(/\D/g,"");return d===""?"":String(Math.max(1,Math.min(48,parseInt(d)||1)));}
 function isValidDate(v){if(!v||v.length!==10)return false;const[dd,mm,yy]=v.split("/");const d=parseInt(dd),m=parseInt(mm),y=parseInt(yy);if(isNaN(d)||isNaN(m)||isNaN(y))return false;if(m<1||m>12||d<1||d>31||y<2020||y>2040)return false;const dt=new Date(y,m-1,d);return dt.getFullYear()===y&&dt.getMonth()===m-1&&dt.getDate()===d;}
 
-// ─── OCR via Claude API ─────────────────────────
-async function ocrImage(base64,mediaType,prompt){
-  try{
-    const resp=await fetch("https://api.anthropic.com/v1/messages",{
-      method:"POST",headers:{"Content-Type":"application/json"},
-      body:JSON.stringify({model:"claude-sonnet-4-20250514",max_tokens:1000,
-        messages:[{role:"user",content:[
-          {type:"image",source:{type:"base64",media_type:mediaType,data:base64}},
-          {type:"text",text:prompt}
-        ]}]
-      })
-    });
-    const data=await resp.json();
-    const text=data.content?.map(c=>c.text||"").join("")||"";
-    const clean=text.replace(/```json|```/g,"").trim();
-    return JSON.parse(clean);
-  }catch(e){console.error("OCR error:",e);return null;}
-}
-async function ocrPDF(base64,prompt){
-  try{
-    const resp=await fetch("https://api.anthropic.com/v1/messages",{
-      method:"POST",headers:{"Content-Type":"application/json"},
-      body:JSON.stringify({model:"claude-sonnet-4-20250514",max_tokens:1000,
-        messages:[{role:"user",content:[
-          {type:"document",source:{type:"base64",media_type:"application/pdf",data:base64}},
-          {type:"text",text:prompt}
-        ]}]
-      })
-    });
-    const data=await resp.json();
-    const text=data.content?.map(c=>c.text||"").join("")||"";
-    const clean=text.replace(/```json|```/g,"").trim();
-    return JSON.parse(clean);
-  }catch(e){console.error("OCR error:",e);return null;}
-}
-async function fileToBase64(file){
-  return new Promise((res,rej)=>{const r=new FileReader();r.onload=()=>res(r.result.split(",")[1]);r.onerror=()=>rej(new Error("Read failed"));r.readAsDataURL(file);});
-}
-
 function Frm({purchase:pu,onClose,onSave}){
   const initTotal=pu?.total?maskMoney(pu.total.toFixed(2).replace(".",",")):"";
   const[lj,setLj]=useState(pu?.loja||"");
@@ -581,28 +542,7 @@ function Frm({purchase:pu,onClose,onSave}){
   const[pc,setPc]=useState(pu?.parcelas?.toString()||"1");
   const[dt,setDt]=useState(pu?.data?fD(pu.data):"");
   const[errors,setErrors]=useState({});
-  const[ocrLoading,setOcrLoading]=useState(false);
-  const fileRef=useRef(null);
   const startM=calcStartMonth(dt);
-
-  const handleOCR=async(e)=>{
-    const file=e.target.files?.[0];if(!file)return;
-    setOcrLoading(true);
-    try{
-      const base64=await fileToBase64(file);
-      const isImg=file.type.startsWith("image/");
-      const prompt='Extraia os dados desta imagem de compra/fatura. Retorne APENAS um JSON com: {"loja":"nome da loja","total":valor_numerico,"parcelas":numero_parcelas,"data":"dd/MM/aaaa"}. Se algum campo não for identificável, use null. Valores numéricos sem aspas. Data no formato dd/MM/aaaa.';
-      const result=isImg?await ocrImage(base64,file.type,prompt):await ocrPDF(base64,prompt);
-      if(result){
-        if(result.loja)setLj(result.loja);
-        if(result.total)setTt(maskMoney(result.total.toFixed(2).replace(".",",")));
-        if(result.parcelas)setPc(String(result.parcelas));
-        if(result.data)setDt(result.data);
-      }else{alert("Não foi possível extrair os dados da imagem.");}
-    }catch{alert("Erro ao processar a imagem.");}
-    setOcrLoading(false);
-    if(fileRef.current)fileRef.current.value="";
-  };
 
   const validate=()=>{
     const e={};
@@ -629,13 +569,6 @@ function Frm({purchase:pu,onClose,onSave}){
   return(<div onClick={onClose} style={{position:"fixed",inset:0,background:"rgba(0,0,0,.75)",display:"flex",alignItems:"center",justifyContent:"center",zIndex:100,backdropFilter:"blur(5px)"}}>
     <div onClick={e=>e.stopPropagation()} className="modal-inner" style={{background:Z.cd,border:`1px solid ${Z.bd2}`,borderRadius:13,padding:22,width:"90%",maxWidth:400,animation:"fi .2s ease"}}>
       <h2 style={{margin:"0 0 16px",fontSize:15,fontWeight:600}}>{pu?"Editar Compra":"Nova Compra"}</h2>
-      {!pu&&<div style={{marginBottom:12}}>
-        <input ref={fileRef} type="file" accept="image/*,.pdf" onChange={handleOCR} style={{display:"none"}}/>
-        <button onClick={()=>fileRef.current?.click()} disabled={ocrLoading} style={{background:`${Z.ac3}20`,color:Z.ac,border:`1px solid ${Z.ac3}40`,borderRadius:6,padding:"8px 14px",fontSize:10,fontWeight:600,cursor:ocrLoading?"wait":"pointer",width:"100%",display:"flex",alignItems:"center",justifyContent:"center",gap:6}}>
-          {ocrLoading?<><span style={{width:12,height:12,border:`2px solid ${Z.bd2}`,borderTopColor:Z.ac,borderRadius:"50%",animation:"sp .7s linear infinite",display:"inline-block"}}/>Extraindo dados...</>:<>📷 Carregar imagem/PDF da compra</>}
-        </button>
-        <div style={{fontSize:8,color:Z.tx3,marginTop:3,textAlign:"center"}}>Foto da fatura, nota fiscal ou comprovante</div>
-      </div>}
       <div style={{display:"flex",flexDirection:"column",gap:10}}>
         <div><label style={{fontSize:10,color:Z.tx3,display:"block",marginBottom:2}}>Loja</label><input value={lj} onChange={e=>{setLj(e.target.value);setErrors(p=>({...p,lj:undefined}));}} placeholder="Nome da loja" style={errors.lj?ie:is}/>{errors.lj&&<div style={eStyle}>{errors.lj}</div>}</div>
         <div className="g2f">
@@ -760,26 +693,6 @@ function BaixasView({baixas,setBaixas,mt,am,isAdmin}){
   const[editIdx,setEditIdx]=useState(null);
   const[editAmt,setEditAmt]=useState("");
   const[editDate,setEditDate]=useState("");
-  const[ocrLoading,setOcrLoading]=useState(false);
-  const bxFileRef=useRef(null);
-
-  const handleBxOCR=async(e)=>{
-    const file=e.target.files?.[0];if(!file)return;
-    setOcrLoading(true);
-    try{
-      const base64=await fileToBase64(file);
-      const isImg=file.type.startsWith("image/");
-      const prompt='Extraia os pagamentos/baixas deste comprovante. Retorne APENAS um JSON array: [{"amount":valor_numerico,"date":"dd/MM/aaaa"}]. Se houver múltiplos pagamentos na imagem, inclua todos. Valores numéricos sem aspas. Data no formato dd/MM/aaaa.';
-      const result=isImg?await ocrImage(base64,file.type,prompt):await ocrPDF(base64,prompt);
-      if(result&&Array.isArray(result)&&result.length>0){
-        setBaixas(prev=>{const u={...prev};const list=[...(u[selM]||[])];result.forEach(r=>{if(r.amount>0)list.push({amount:r.amount,date:r.date||null});});u[selM]=list;return u;});
-      }else if(result&&result.amount){
-        setBaixas(prev=>{const u={...prev};const list=[...(u[selM]||[]),{amount:result.amount,date:result.date||null}];u[selM]=list;return u;});
-      }else{alert("Não foi possível extrair os dados do comprovante.");}
-    }catch{alert("Erro ao processar o comprovante.");}
-    setOcrLoading(false);
-    if(bxFileRef.current)bxFileRef.current.value="";
-  };
 
   const mBx=baixas[selM]||[];
   const totalBx=mBx.reduce((s,b)=>s+b.amount,0);
@@ -846,13 +759,7 @@ function BaixasView({baixas,setBaixas,mt,am,isAdmin}){
           <div style={{fontSize:12,fontWeight:600,color:Z.ac}}>Baixas</div>
           <select value={selM} onChange={e=>{setSelM(e.target.value);setShowAdd(false);}} style={{background:Z.cd2,color:Z.tx,border:`1px solid ${Z.bd}`,borderRadius:6,padding:"5px 8px",fontSize:11,fontFamily:Z.ft,cursor:"pointer"}}>{am.map(m=><option key={m} value={m}>{m}</option>)}</select>
         </div>
-        {isAdmin&&!showAdd&&<div style={{display:"flex",gap:6}}>
-          <input ref={bxFileRef} type="file" accept="image/*,.pdf" onChange={handleBxOCR} style={{display:"none"}}/>
-          <button onClick={()=>bxFileRef.current?.click()} disabled={ocrLoading} style={{background:`${Z.gn}20`,color:Z.gn,border:`1px solid ${Z.gn}40`,borderRadius:6,padding:"6px 12px",fontSize:10,fontWeight:600,cursor:ocrLoading?"wait":"pointer",display:"flex",alignItems:"center",gap:4}}>
-            {ocrLoading?<><span style={{width:10,height:10,border:`2px solid ${Z.bd2}`,borderTopColor:Z.gn,borderRadius:"50%",animation:"sp .7s linear infinite",display:"inline-block"}}/>Lendo...</>:<>📷 Comprovante</>}
-          </button>
-          <button onClick={()=>{setShowAdd(true);setBAmt("");setBDate("");setBErr({});}} style={{background:`linear-gradient(135deg,${Z.ac3},${Z.ac2})`,color:"#fff",border:"none",borderRadius:6,padding:"6px 14px",fontSize:10,fontWeight:600,cursor:"pointer"}}>+ Nova Baixa</button>
-        </div>}
+        {isAdmin&&!showAdd&&<button onClick={()=>{setShowAdd(true);setBAmt("");setBDate("");setBErr({});}} style={{background:`linear-gradient(135deg,${Z.ac3},${Z.ac2})`,color:"#fff",border:"none",borderRadius:6,padding:"6px 14px",fontSize:10,fontWeight:600,cursor:"pointer"}}>+ Nova Baixa</button>}
       </div>
 
       {isAdmin&&showAdd&&(<div style={{padding:12,background:Z.cd2,borderRadius:8,border:`1px solid ${Z.bd2}`,marginBottom:12,animation:"fi .15s ease"}}>
