@@ -1,0 +1,23 @@
+rules_version = '2';
+service cloud.firestore {
+  match /databases/{database}/documents {
+
+    function email() {
+      return request.auth != null && request.auth.token.email_verified == true
+        ? request.auth.token.email : '';
+    }
+    function isAdmin()  { return email() == 'kovags@gmail.com'; }
+    function isViewer() { return email() == 'kelianeserra@gmail.com'; }
+
+    // data/main = produção, data/homolog = homologação
+    match /data/{docId} {
+      allow read:  if docId in ['main', 'homolog'] && (isAdmin() || isViewer());
+      allow write: if docId in ['main', 'homolog'] && isAdmin();
+    }
+
+    // Qualquer outro caminho: bloqueado
+    match /{document=**} {
+      allow read, write: if false;
+    }
+  }
+}
