@@ -104,7 +104,7 @@ async function ld(){
         }
       }
     }
-  }catch(e){console.error("Load error:",e);}
+  }catch(e){console.error("Load error:",e);if(initFB())return{error:String(e?.code||e?.message||e)};}
   // Fallback: try window.storage
   try{
     const r=await window.storage.get("cc-despesas-v10");
@@ -195,7 +195,7 @@ function exportXLSX(ps,baixas,ppl,mt){
 
 function App(){
   const[user,setUser]=useState(null);const[role,setRole]=useState(null);const[authLoading,setAuthLoading]=useState(true);const[authError,setAuthError]=useState(null);
-  const[ps,setPs]=useState([]);const[ppl,setPpl]=useState({});const[baixas,setBaixas]=useState({});const[ok,setOk]=useState(false);const[saving,setSaving]=useState(false);const[lastUpdate,setLastUpdate]=useState(null);
+  const[ps,setPs]=useState([]);const[ppl,setPpl]=useState({});const[baixas,setBaixas]=useState({});const[ok,setOk]=useState(false);const[saving,setSaving]=useState(false);const[lastUpdate,setLastUpdate]=useState(null);const[loadErr,setLoadErr]=useState(null);
   const[tab,setTab]=useState("dashboard");const[sm,setSm]=useState(cmk());const[sf,setSf]=useState(false);const[ep,setEp]=useState(null);const[sr,setSr]=useState("");const[toast,setToast]=useState(null);
   const isAdmin=role==="admin";
 
@@ -220,7 +220,7 @@ function App(){
   },[]);
 
   // Load data after auth
-  useEffect(()=>{if(!user||!role)return;(async()=>{const d=await ld();if(d?.purchases){svRef.current=JSON.stringify({purchases:d.purchases,people:d.people||{},baixas:d.baixas||{}});setPs(fixTrunc(d.purchases));setPpl(d.people||{});setBaixas(d.baixas||{});if(d.updatedAt)setLastUpdate(d.updatedAt);}else{setPs(SEED_P);setPpl(SEED_PPL);setBaixas(SEED_BX);if(isAdmin)await sv({purchases:SEED_P,people:SEED_PPL,baixas:SEED_BX});}setOk(true);})();},[user,role]);
+  useEffect(()=>{if(!user||!role)return;(async()=>{const d=await ld();if(d?.error){setLoadErr(d.error);return;}if(d?.purchases){svRef.current=JSON.stringify({purchases:d.purchases,people:d.people||{},baixas:d.baixas||{}});setPs(fixTrunc(d.purchases));setPpl(d.people||{});setBaixas(d.baixas||{});if(d.updatedAt)setLastUpdate(d.updatedAt);}else{setPs(SEED_P);setPpl(SEED_PPL);setBaixas(SEED_BX);if(isAdmin)await sv({purchases:SEED_P,people:SEED_PPL,baixas:SEED_BX});}setOk(true);})();},[user,role]);
 
   const tr=useRef(null);const svRef=useRef(null);
   useEffect(()=>{if(!ok||!isAdmin)return;const snap=JSON.stringify({purchases:ps,people:ppl,baixas});if(snap===svRef.current)return;if(tr.current)clearTimeout(tr.current);tr.current=setTimeout(async()=>{setSaving(true);const now=new Date().toISOString();const ok2=await sv({purchases:ps,people:ppl,baixas});setSaving(false);if(ok2){svRef.current=snap;setLastUpdate(now);}tt(ok2?"Salvo no Firebase ☁":"Salvo localmente");},.8e3);},[ps,ppl,baixas,ok]);
@@ -254,6 +254,7 @@ function App(){
   </div>);
 
   // Data loading
+  if(loadErr)return(<div style={{minHeight:"100vh",background:Z.bg,display:"flex",alignItems:"center",justifyContent:"center",fontFamily:Z.ft,padding:16}}><div style={{textAlign:"center",maxWidth:360}}><div style={{fontSize:14,color:Z.rd,fontWeight:600,marginBottom:8}}>Não foi possível carregar os dados</div><div style={{fontSize:11,color:Z.tx2,marginBottom:14}}>Nada foi gravado. Verifique a conexão e tente novamente.<br/><span style={{color:Z.tx3,fontFamily:Z.mn}}>{loadErr}</span></div><button onClick={()=>location.reload()} style={{background:`linear-gradient(135deg,${Z.ac3},${Z.ac2})`,color:"#fff",border:"none",borderRadius:6,padding:"8px 16px",fontSize:12,fontWeight:600,cursor:"pointer"}}>Tentar novamente</button></div></div>);
   if(!ok)return(<div style={{minHeight:"100vh",background:Z.bg,display:"flex",alignItems:"center",justifyContent:"center",color:Z.ac,fontFamily:Z.ft}}><div style={{textAlign:"center"}}><div style={{width:44,height:44,border:`3px solid ${Z.bd2}`,borderTopColor:Z.ac,borderRadius:"50%",animation:"sp .7s linear infinite",margin:"0 auto 14px"}}/><div style={{fontSize:13,color:Z.tx2}}>Carregando dados...</div><style>{`@keyframes sp{to{transform:rotate(360deg)}}`}</style></div></div>);
 
   return(<div style={{minHeight:"100vh",background:Z.bg,color:Z.tx,fontFamily:Z.ft}}>
