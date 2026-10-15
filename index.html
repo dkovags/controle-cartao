@@ -25,10 +25,12 @@
 <div id="root"></div>
 <script type="text/babel">
 const { useState, useMemo, useEffect, useRef } = React;
-const MO=["Abril/2023","Maio/2023","Junho/2023","Julho/2023","Agosto/2023","Setembro/2023","Outubro/2023","Novembro/2023","Dezembro/2023","Janeiro/2024","Fevereiro/2024","Março/2024","Abril/2024","Maio/2024","Junho/2024","Julho/2024","Agosto/2024","Setembro/2024","Outubro/2024","Novembro/2024","Dezembro/2024","Janeiro/2025","Fevereiro/2025","Março/2025","Abril/2025","Maio/2025","Junho/2025","Julho/2025","Agosto/2025","Setembro/2025","Outubro/2025","Novembro/2025","Dezembro/2025","Janeiro/2026","Fevereiro/2026","Março/2026","Abril/2026","Maio/2026","Junho/2026","Julho/2026","Agosto/2026","Setembro/2026","Outubro/2026","Novembro/2026","Dezembro/2026"];
+
 const MS=["Jan","Fev","Mar","Abr","Mai","Jun","Jul","Ago","Set","Out","Nov","Dez"];
 const MM={"Janeiro":0,"Fevereiro":1,"Março":2,"Abril":3,"Maio":4,"Junho":5,"Julho":6,"Agosto":7,"Setembro":8,"Outubro":9,"Novembro":10,"Dezembro":11};
 const MN=["Janeiro","Fevereiro","Março","Abril","Maio","Junho","Julho","Agosto","Setembro","Outubro","Novembro","Dezembro"];
+// Calendário interno gerado (Abril/2023 até dezembro de daqui a 10 anos), sem limite fixo de data
+const MO=(()=>{const a=[];const fy=new Date().getFullYear()+10;for(let y=2023;y<=fy;y++)for(let m=y===2023?3:0;m<12;m++)a.push(`${MN[m]}/${y}`);return a;})();
 function pmk(k){if(!k)return null;const p=k.split("/");if(p.length!==2)return null;return{month:MM[p[0]]??0,year:parseInt(p[1])};}
 function cmk(){const n=new Date();return`${MN[n.getMonth()]}/${n.getFullYear()}`;}
 function fB(v){if(v==null||isNaN(v))return"R$ 0,00";const n=Object.is(v,-0)||Math.abs(v)<0.005?0:v;return"R$ "+n.toLocaleString("pt-BR",{minimumFractionDigits:2,maximumFractionDigits:2});}
@@ -106,6 +108,8 @@ async function ld(){
   }catch{}
   return null;
 }
+// Repara compras cujas parcelas foram cortadas pelo antigo limite fixo do calendário (Dezembro/2026)
+function fixTrunc(ps){return ps.map(p=>{const k=Object.keys(p.monthly||{});const n=p.parcelas||0;if(!k.length||k.length>=n||k[k.length-1]!=="Dezembro/2026")return p;const v=p.monthly[k[k.length-1]];const m={...p.monthly};let i=MO.indexOf("Dezembro/2026");for(let c=k.length;c<n;c++)m[MO[++i]]=v;return{...p,monthly:m};});}
 async function sv(d){
   try{
     const fdb=initFB();
@@ -212,12 +216,12 @@ function App(){
   },[]);
 
   // Load data after auth
-  useEffect(()=>{if(!user||!role)return;(async()=>{const d=await ld();if(d?.purchases){setPs(d.purchases);setPpl(d.people||{});setBaixas(d.baixas||{});if(d.updatedAt)setLastUpdate(d.updatedAt);}else{setPs(SEED_P);setPpl(SEED_PPL);setBaixas(SEED_BX);if(isAdmin)await sv({purchases:SEED_P,people:SEED_PPL,baixas:SEED_BX});}setOk(true);})();},[user,role]);
+  useEffect(()=>{if(!user||!role)return;(async()=>{const d=await ld();if(d?.purchases){svRef.current=JSON.stringify({purchases:d.purchases,people:d.people||{},baixas:d.baixas||{}});setPs(fixTrunc(d.purchases));setPpl(d.people||{});setBaixas(d.baixas||{});if(d.updatedAt)setLastUpdate(d.updatedAt);}else{setPs(SEED_P);setPpl(SEED_PPL);setBaixas(SEED_BX);if(isAdmin)await sv({purchases:SEED_P,people:SEED_PPL,baixas:SEED_BX});}setOk(true);})();},[user,role]);
 
-  const tr=useRef(null);
-  useEffect(()=>{if(!ok||!isAdmin)return;if(tr.current)clearTimeout(tr.current);tr.current=setTimeout(async()=>{setSaving(true);const now=new Date().toISOString();const ok2=await sv({purchases:ps,people:ppl,baixas});setSaving(false);if(ok2)setLastUpdate(now);tt(ok2?"Salvo no Firebase ☁":"Salvo localmente");},.8e3);},[ps,ppl,baixas,ok]);
+  const tr=useRef(null);const svRef=useRef(null);
+  useEffect(()=>{if(!ok||!isAdmin)return;const snap=JSON.stringify({purchases:ps,people:ppl,baixas});if(snap===svRef.current)return;if(tr.current)clearTimeout(tr.current);tr.current=setTimeout(async()=>{setSaving(true);const now=new Date().toISOString();const ok2=await sv({purchases:ps,people:ppl,baixas});setSaving(false);if(ok2){svRef.current=snap;setLastUpdate(now);}tt(ok2?"Salvo no Firebase ☁":"Salvo localmente");},.8e3);},[ps,ppl,baixas,ok]);
   const tt=(m)=>{setToast(m);setTimeout(()=>setToast(null),2e3);};
-  const am=useMemo(()=>{const s=new Set(MO);ps.forEach(p=>Object.keys(p.monthly).forEach(m=>s.add(m)));return MO.filter(m=>s.has(m));},[ps]);
+  const am=useMemo(()=>{const s=new Set([cmk()]);ps.forEach(p=>Object.keys(p.monthly).forEach(m=>s.add(m)));Object.keys(baixas).forEach(m=>{if((baixas[m]||[]).length)s.add(m);});return MO.filter(m=>s.has(m));},[ps,baixas]);
   const mt=useMemo(()=>{const t={};am.forEach(m=>{t[m]=0;});ps.forEach(p=>Object.entries(p.monthly).forEach(([m,v])=>{t[m]=(t[m]||0)+v;}));return t;},[ps,am]);
   const cmp=useMemo(()=>ps.filter(p=>p.monthly[sm]>0),[ps,sm]);
   const ap=useMemo(()=>ps.filter(p=>{const k=Object.keys(p.monthly);if(!k.length)return true;return MO.indexOf(k[k.length-1])>=MO.indexOf(cmk());}),[ps]);
@@ -362,7 +366,7 @@ function Dash({mt,sm,setSm,cmp,td,ap,am,ps,baixas,setBaixas,isAdmin}){
   const bxES={fontSize:8,color:Z.rd,marginTop:1};
 
   return(<div>
-    <div style={{display:"flex",alignItems:"center",gap:8,marginBottom:18}}><select value={sm} onChange={e=>{setSm(e.target.value);setSelLoja(null);setShowAddBx(false);}} style={{background:Z.cd,color:Z.tx,border:`1px solid ${Z.bd}`,borderRadius:6,padding:"6px 9px",fontSize:12,fontWeight:500,cursor:"pointer",fontFamily:Z.ft}}>{am.map(m=><option key={m} value={m}>{m}</option>)}</select></div>
+    <div style={{display:"flex",alignItems:"center",gap:8,marginBottom:18}}><select value={sm} onChange={e=>{setSm(e.target.value);setSelLoja(null);setShowAddBx(false);}} style={{background:Z.cd,color:Z.tx,border:`1px solid ${Z.bd}`,borderRadius:6,padding:"6px 9px",fontSize:12,fontWeight:500,cursor:"pointer",fontFamily:Z.ft}}>{[...am].reverse().map(m=><option key={m} value={m}>{m}</option>)}</select></div>
     <div className="stat-row" style={{display:"flex",gap:10,flexWrap:"wrap",marginBottom:18}}>
       <St label="Fatura do Mês" value={fB(c)} sub={df!==0?`${df>0?"▲":"▼"} ${Math.abs(df).toFixed(1)}%`:null} color={Z.ac}/>
       <St label="Baixas do Mês" value={fB(totalBaixas)} sub={`${mBaixas.length} pagamento${mBaixas.length!==1?"s":""}`} color={Z.gn}/>
@@ -486,7 +490,7 @@ function Purch({ps,setPs,sr,setSr,setEp,isAdmin}){
     <div style={{display:"flex",gap:8,marginBottom:14,flexWrap:"wrap"}}>
       <div style={{position:"relative",flex:"1 1 120px"}}><span style={{position:"absolute",left:8,top:"50%",transform:"translateY(-50%)",color:Z.tx3,fontSize:13}}>🔍</span><input value={sr} onChange={e=>setSr(e.target.value)} placeholder="Buscar loja..." style={is}/></div>
       <select value={fl} onChange={e=>setFl(e.target.value)} style={ss}><option value="">Todas as lojas</option>{ls.map(l=><option key={l} value={l}>{l}</option>)}</select>
-      <select value={filterMonth} onChange={e=>setFilterMonth(e.target.value)} style={ss}><option value="">Todos os meses</option>{allMonths.map(m=><option key={m} value={m}>{m}</option>)}</select>
+      <select value={filterMonth} onChange={e=>setFilterMonth(e.target.value)} style={ss}><option value="">Todos os meses</option>{[...allMonths].reverse().map(m=><option key={m} value={m}>{m}</option>)}</select>
       <select value={so} onChange={e=>setSo(e.target.value)} style={ss}><option value="date-desc">Recentes</option><option value="date-asc">Antigas</option><option value="total-desc">Maior valor</option><option value="total-asc">Menor valor</option></select>
     </div>
     <div style={{fontSize:10,color:Z.tx3,marginBottom:8}}>{fd.length} compras {status==="concluidas"?"concluídas":status==="ativas"?"ativas":"total"} — Total: <span style={{color:Z.ac,fontFamily:Z.mn}}>{fB(fd.reduce((s,p)=>s+p.total,0))}</span></div>
@@ -757,7 +761,7 @@ function BaixasView({baixas,setBaixas,mt,am,isAdmin}){
       <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:12,flexWrap:"wrap",gap:8}}>
         <div style={{display:"flex",alignItems:"center",gap:8,flexWrap:"wrap"}}>
           <div style={{fontSize:12,fontWeight:600,color:Z.ac}}>Baixas</div>
-          <select value={selM} onChange={e=>{setSelM(e.target.value);setShowAdd(false);}} style={{background:Z.cd2,color:Z.tx,border:`1px solid ${Z.bd}`,borderRadius:6,padding:"5px 8px",fontSize:11,fontFamily:Z.ft,cursor:"pointer"}}>{am.map(m=><option key={m} value={m}>{m}</option>)}</select>
+          <select value={selM} onChange={e=>{setSelM(e.target.value);setShowAdd(false);}} style={{background:Z.cd2,color:Z.tx,border:`1px solid ${Z.bd}`,borderRadius:6,padding:"5px 8px",fontSize:11,fontFamily:Z.ft,cursor:"pointer"}}>{[...am].reverse().map(m=><option key={m} value={m}>{m}</option>)}</select>
         </div>
         {isAdmin&&!showAdd&&<button onClick={()=>{setShowAdd(true);setBAmt("");setBDate("");setBErr({});}} style={{background:`linear-gradient(135deg,${Z.ac3},${Z.ac2})`,color:"#fff",border:"none",borderRadius:6,padding:"6px 14px",fontSize:10,fontWeight:600,cursor:"pointer"}}>+ Nova Baixa</button>}
       </div>
