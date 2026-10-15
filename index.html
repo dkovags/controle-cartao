@@ -80,12 +80,16 @@ async function loginGoogle(){
 }
 async function logout(){const auth=getAuth();if(auth)await auth.signOut();}
 function getUserRole(email){return ROLES[email]||null;}
-const DOC_PATH="data/main";
+// Homologação (/homolog/) grava em documento separado, sem tocar a produção
+const IS_HML=location.pathname.includes("/homolog/");
+const DOC_PATH=IS_HML?"data/homolog":"data/main";
 async function ld(){
   try{
     const fdb=initFB();
     if(fdb){
-      const doc=await fdb.doc(DOC_PATH).get();
+      let doc=await fdb.doc(DOC_PATH).get();
+      // Primeiro acesso à homologação: copia os dados da produção
+      if(!doc.exists&&IS_HML){const src=await fdb.doc("data/main").get();if(src.exists){await fdb.doc(DOC_PATH).set(src.data());doc=await fdb.doc(DOC_PATH).get();}}
       if(doc.exists){
         const d=doc.data();
         if(d?.purchases){
@@ -279,7 +283,7 @@ function App(){
     <header style={{background:Z.cd,borderBottom:`1px solid ${Z.bd}`,padding:"13px 18px",display:"flex",alignItems:"center",justifyContent:"space-between",position:"sticky",top:0,zIndex:50,flexWrap:"wrap",gap:8}}>
       <div style={{display:"flex",alignItems:"center",gap:9}}>
         <div style={{width:32,height:32,borderRadius:8,background:`linear-gradient(135deg,${Z.ac3},${Z.ac2})`,display:"flex",alignItems:"center",justifyContent:"center",fontFamily:Z.mn,fontWeight:700,fontSize:8,color:"#fff"}}>CPC</div>
-        <div><h1 style={{margin:0,fontSize:13,fontWeight:600,letterSpacing:"-.02em",lineHeight:1.2}}>CPC - Controle de Pagamentos com Cartão</h1><div style={{fontSize:9,color:Z.tx3,display:"flex",alignItems:"center",gap:5}}>{saving?<><span style={{width:5,height:5,borderRadius:3,background:Z.yl,animation:"pu .8s ease infinite",display:"inline-block"}}/>Sincronizando...</>:<><span style={{width:5,height:5,borderRadius:3,background:Z.gn,display:"inline-block"}}/>Firebase ☁</>}</div></div>
+        <div><h1 style={{margin:0,fontSize:13,fontWeight:600,letterSpacing:"-.02em",lineHeight:1.2}}>CPC - Controle de Pagamentos com Cartão{IS_HML&&<span style={{marginLeft:8,background:Z.yl,color:"#000",borderRadius:4,padding:"2px 6px",fontSize:9,fontWeight:700,verticalAlign:"middle"}}>HOMOLOGAÇÃO</span>}</h1><div style={{fontSize:9,color:Z.tx3,display:"flex",alignItems:"center",gap:5}}>{saving?<><span style={{width:5,height:5,borderRadius:3,background:Z.yl,animation:"pu .8s ease infinite",display:"inline-block"}}/>Sincronizando...</>:<><span style={{width:5,height:5,borderRadius:3,background:Z.gn,display:"inline-block"}}/>Firebase ☁</>}</div></div>
       </div>
       <div style={{display:"flex",alignItems:"center",gap:6}}>
         <div style={{display:"flex",alignItems:"center",gap:5}}>
@@ -866,7 +870,7 @@ function Rpts({ps,mt,am}){
 ReactDOM.createRoot(document.getElementById("root")).render(<App />);
 </script>
 <script>
-if('serviceWorker' in navigator){navigator.serviceWorker.register('sw.js').catch(()=>{});}
+if(!location.pathname.includes('/homolog/')&&'serviceWorker' in navigator){navigator.serviceWorker.register('sw.js').catch(()=>{});}
 </script>
 </body>
 </html>
