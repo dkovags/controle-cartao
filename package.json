@@ -1,0 +1,6 @@
+{
+  "name": "controle-cartao",
+  "private": true,
+  "scripts": { "build": "node build.js" },
+  "devDependencies": { "@babel/standalone": "7.23.9" }
+}
