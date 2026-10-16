@@ -7,7 +7,10 @@ const Babel = require("@babel/standalone");
 const src = fs.readFileSync("src/index.html", "utf8");
 const m = src.match(/<script type="text\/babel">([\s\S]*?)<\/script>/);
 if (!m) throw new Error("Bloco <script type=\"text/babel\"> não encontrado");
-const js = Babel.transform(m[1], { presets: ["react"], minified: true, comments: false }).code;
+// Versão exibida no app (data/hora do build), para saber qual versão está aberta
+const d = new Date(Date.now() - 3 * 3600e3).toISOString();
+const VERSION = `${d.slice(8, 10)}/${d.slice(5, 7)}/${d.slice(0, 4)} ${d.slice(11, 16)}`;
+const js = Babel.transform(m[1].replace("__VERSION__", VERSION), { presets: ["react"], minified: true, comments: false }).code;
 
 const page = src
   .replace(m[0], () => `<script>${js}</script>`)

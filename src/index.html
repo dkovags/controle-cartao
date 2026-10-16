@@ -35,6 +35,8 @@ const MO=(()=>{const a=[];const fy=new Date().getFullYear()+10;for(let y=2023;y<
 function pmk(k){if(!k)return null;const p=k.split("/");if(p.length!==2)return null;return{month:MM[p[0]]??0,year:parseInt(p[1])};}
 function cmk(){const n=new Date();return`${MN[n.getMonth()]}/${n.getFullYear()}`;}
 function fB(v){if(v==null||isNaN(v))return"R$ 0,00";const n=Object.is(v,-0)||Math.abs(v)<0.005?0:v;return"R$ "+n.toLocaleString("pt-BR",{minimumFractionDigits:2,maximumFractionDigits:2});}
+// Chave numérica (aaaammdd) da data da compra, para ordenar; aceita dd/mm/aa e dd/mm/aaaa
+function dKey(p){const d=p.data;if(!d)return 0;const m=d.match(/^(\d{2})\/(\d{2})\/(\d{2}|\d{4})$/);if(!m)return 0;const y=m[3].length===2?2000+ +m[3]:+m[3];return y*1e4+ +m[2]*100+ +m[1];}
 function fD(d){if(!d)return"—";if(d.includes("-")){const p=d.split("-");if(p[0].length===4)return`${p[2]}/${p[1]}/${p[0]}`;}return d;}
 
 function calcStartMonth(dateStr){
@@ -82,6 +84,7 @@ async function loginGoogle(){
 async function logout(){const auth=getAuth();if(auth)await auth.signOut();}
 function getUserRole(email){return ROLES[email]||null;}
 // Homologação (/homolog/) grava em documento separado, sem tocar a produção
+const APP_VERSION="__VERSION__";
 const IS_HML=location.pathname.includes("/homolog/");
 const DOC_PATH=IS_HML?"data/homolog":"data/main";
 // Repara compras cujas parcelas foram cortadas pelo antigo limite fixo do calendário (Dezembro/2026)
@@ -91,7 +94,7 @@ const pJ=v=>typeof v==="string"?JSON.parse(v):v;
 function parseDoc(d){
   const baixas=pJ(d.baixas)||{};
   Object.keys(SEED_BX).forEach(m=>{if(!baixas[m])baixas[m]=SEED_BX[m];});
-  return{purchases:pJ(d.purchases)||[],people:pJ(d.people)||{},baixas,updatedAt:d.updatedAt||null,rev:d.rev||0,history:pJ(d.history)||[]};
+  return{purchases:pJ(d.purchases)||[],people:pJ(d.people)||{},baixas,updatedAt:d.updatedAt||null,rev:d.rev||0,history:pJ(d.history)||[],incOk:pJ(d.incOk)||{}};
 }
 // Primeiro acesso à homologação: copia os dados da produção
 async function prepDoc(){
@@ -108,7 +111,7 @@ async function saveTx(next,baseRev,changes,who){
     const hist=s.exists?(pJ(s.data().history)||[]):[];const now=new Date().toISOString();
     if(changes.length)hist.push({ts:now,user:who,changes});
     while(hist.length>500)hist.shift();
-    t.set(ref,{purchases:JSON.stringify(next.purchases),people:JSON.stringify(next.people),baixas:JSON.stringify(next.baixas),updatedAt:now,rev:cur+1,history:JSON.stringify(hist)});
+    t.set(ref,{purchases:JSON.stringify(next.purchases),people:JSON.stringify(next.people),baixas:JSON.stringify(next.baixas),incOk:JSON.stringify(next.incOk||{}),updatedAt:now,rev:cur+1,history:JSON.stringify(hist)});
     return{rev:cur+1,now,hist};
   });
 }
@@ -140,6 +143,9 @@ function diffData(a,b){
     n.forEach(x=>{const k=JSON.stringify(x);if(cnt[k])cnt[k]--;else out.push(`Nova baixa em ${m}: ${bk(x)}`);});
     Object.entries(cnt).forEach(([k,c])=>{for(let i=0;i<c;i++)out.push(`Baixa excluída em ${m}: ${bk(JSON.parse(k))}`);});
   });
+  const ia=a.incOk||{},ib=b.incOk||{};
+  Object.keys(ib).forEach(k=>{if(!ia[k])out.push(`Inconsistência marcada como tratada: ${ib[k].label||k}`);});
+  Object.keys(ia).forEach(k=>{if(!ib[k])out.push(`Inconsistência reaberta: ${ia[k].label||k}`);});
   new Set([...Object.keys(a.people),...Object.keys(b.people)]).forEach(n=>{if(JSON.stringify(a.people[n])!==JSON.stringify(b.people[n]))out.push(`Terceiros alterados: ${n}`);});
   return out;
 }
@@ -209,6 +215,289 @@ function exportXLSX(ps,baixas,ppl,mt){
   XLSX.writeFile(wb,`CPC_Export_${ts}.xlsx`);
 }
 
+// ─── IMPRESSÃO E RELATÓRIOS ───
+const pTh={textAlign:"left",padding:"6px 8px",borderBottom:"2px solid #333",fontSize:11};
+const pTd={padding:"5px 8px",borderBottom:"1px solid #ddd",fontSize:11,verticalAlign:"top"};
+const pR={textAlign:"right",whiteSpace:"nowrap"};
+const pTf={...pTd,fontWeight:700,borderTop:"2px solid #333",borderBottom:"none"};
+const nowBR=()=>new Date().toLocaleString("pt-BR",{day:"2-digit",month:"2-digit",year:"numeric",hour:"2-digit",minute:"2-digit"});
+// Janela com prévia em folha branca; ao imprimir, só a folha sai no papel
+// Nome do arquivo ao "Salvar como PDF": o navegador usa o título da página
+const pdfName=(title,comp)=>`${IS_HML?"[HML] ":""}${title} - ${comp}`.replace(/\//g,"-");
+const monthTitle=(showL,showB)=>showL&&showB?"Relatório de Lançamentos e Baixas":showL?"Relatório de Lançamentos":"Relatório de Baixas";
+function PrintShell({controls,onClose,children,docName}){
+  useEffect(()=>{if(!docName)return;const old=document.title;document.title=docName;return()=>{document.title=old;};},[docName]);
+  const btn={border:"none",borderRadius:6,padding:"8px 16px",fontSize:12,fontWeight:600,cursor:"pointer",fontFamily:Z.ft};
+  return ReactDOM.createPortal(<div className="print-modal" style={{position:"fixed",inset:0,background:"rgba(0,0,0,.7)",zIndex:300,overflowY:"auto",padding:16,fontFamily:Z.ft}}>
+    <div className="no-print" style={{maxWidth:760,margin:"0 auto 10px",display:"flex",justifyContent:"space-between",alignItems:"center",gap:10,flexWrap:"wrap",background:Z.cd,border:`1px solid ${Z.bd2}`,borderRadius:10,padding:"10px 14px"}}>
+      <div style={{display:"flex",alignItems:"center",gap:10,flexWrap:"wrap"}}>{controls}</div>
+      <div style={{display:"flex",gap:6}}><button onClick={()=>window.print()} style={{...btn,background:`linear-gradient(135deg,${Z.ac3},${Z.ac2})`,color:"#fff"}}>Imprimir</button><button onClick={onClose} style={{...btn,background:Z.cd2,color:Z.tx2,border:`1px solid ${Z.bd}`}}>Fechar</button></div>
+    </div>
+    <div className="print-sheet" style={{WebkitPrintColorAdjust:"exact",printColorAdjust:"exact",maxWidth:760,margin:"0 auto",background:"#fff",color:"#111",borderRadius:6,padding:"clamp(14px,4vw,30px)",fontFamily:"Arial,Helvetica,sans-serif"}}>{children}</div>
+  </div>,document.body);
+}
+// Documento impresso: o cabeçalho (título e competência) se repete em todas as páginas
+function ReportDoc({title,comp,children}){
+  return(<table style={{width:"100%",borderCollapse:"collapse"}}>
+    <thead><tr><td style={{padding:0}}>
+      <div style={{display:"flex",justifyContent:"space-between",alignItems:"flex-end",borderBottom:"2px solid #111",paddingBottom:8,marginBottom:14,gap:10,flexWrap:"wrap"}}>
+        <div>
+          <div style={{fontSize:11,color:"#555"}}>CPC – Controle de Pagamentos com Cartão{IS_HML?" (homologação)":""}</div>
+          <div style={{fontSize:20,fontWeight:700,lineHeight:1.2}}>{title}</div>
+          <div style={{fontSize:12,marginTop:2}}>Competência: <b>{comp}</b></div>
+        </div>
+        <div style={{fontSize:10,color:"#555"}}>Impresso em {nowBR()}</div>
+      </div>
+    </td></tr></thead>
+    <tbody><tr><td style={{padding:0}}>{children}</td></tr></tbody>
+  </table>);
+}
+// Folha do mês: lançamentos e/ou baixas
+function MonthSheet({sm,ps,baixas,mt,showL,showB,incErr}){
+  const rows=ps.filter(p=>p.monthly[sm]>0).sort((a,b)=>dKey(b)-dKey(a)).map(p=>{const k=Object.keys(p.monthly).sort((x,y)=>MO.indexOf(x)-MO.indexOf(y));return{...p,v:p.monthly[sm],n:k.indexOf(sm)+1,N:Math.max(p.parcelas||0,k.length)};});
+  const tot=mt[sm]||0;const bx=baixas[sm]||[];const tb=bx.reduce((s,b)=>s+b.amount,0);
+  const title=monthTitle(showL,showB);
+  return(<ReportDoc title={title} comp={sm}>
+    {showL&&(rows.length?(<table style={{width:"100%",borderCollapse:"collapse"}}>
+      <thead><tr><th style={pTh}>Data da compra</th><th style={pTh}>Loja</th><th style={{...pTh,textAlign:"center"}}>Parcela</th><th style={{...pTh,...pR}}>Valor</th></tr></thead>
+      <tbody>{rows.map(p=>(<tr key={p.id}><td style={pTd}>{fD(p.data)}</td><td style={pTd}>{p.loja}</td><td style={{...pTd,textAlign:"center"}}>{p.n}/{p.N}</td><td style={{...pTd,...pR}}>{fB(p.v)}</td></tr>))}</tbody>
+      <tfoot><tr><td style={pTf} colSpan={3}>Total do mês ({rows.length} lançamento{rows.length!==1?"s":""})</td><td style={{...pTf,...pR}}>{fB(tot)}</td></tr></tfoot>
+    </table>):(<div style={{fontSize:11,color:"#555"}}>Nenhum lançamento neste mês.</div>))}
+    {showB&&(<div style={{marginTop:showL?24:0}}>
+      {showL&&<div style={{fontSize:14,fontWeight:700,marginBottom:6}}>Baixas – {sm}</div>}
+      {bx.length?(<table style={{width:"100%",borderCollapse:"collapse"}}>
+        <thead><tr><th style={pTh}>#</th><th style={pTh}>Data do pagamento</th><th style={{...pTh,...pR}}>Valor</th></tr></thead>
+        <tbody>{bx.map((b,i)=>(<tr key={i}><td style={pTd}>{i+1}</td><td style={pTd}>{fD(b.date)}</td><td style={{...pTd,...pR}}>{fB(b.amount)}</td></tr>))}</tbody>
+        <tfoot><tr><td style={pTf} colSpan={2}>Total de baixas</td><td style={{...pTf,...pR}}>{fB(tb)}</td></tr></tfoot>
+      </table>):(<div style={{fontSize:11,color:"#555"}}>Nenhuma baixa registrada neste mês.</div>)}
+    </div>)}
+    {showL&&showB&&(<table style={{marginTop:14,marginLeft:"auto",borderCollapse:"collapse",fontSize:12}}><tbody>
+      <tr><td style={{padding:"3px 10px"}}>Total do mês</td><td style={{padding:"3px 0",...pR}}>{fB(tot)}</td></tr>
+      <tr><td style={{padding:"3px 10px"}}>Baixas</td><td style={{padding:"3px 0",...pR}}>{fB(tb)}</td></tr>
+      <tr><td style={{padding:"3px 10px",fontWeight:700,borderTop:"1px solid #333"}}>{tb-tot>=0?"Saldo do mês":"Falta pagar"}</td><td style={{padding:"3px 0",fontWeight:700,borderTop:"1px solid #333",...pR}}>{fB(Math.abs(tb-tot))}</td></tr>
+      {incErr&&(()=>{const net=incErr.reduce((s,x)=>s+x.x.v,0);const adj=tb-tot+net;return(<>
+        <tr><td style={{padding:"3px 10px"}}>Inconsistências (erros)</td><td style={{padding:"3px 0",...pR,color:Math.abs(net)<.005?"#111":vCor(net)}}>{net>=0?"+":"−"} {fB(Math.abs(net))}</td></tr>
+        <tr style={{background:adj>=0?"#e8f5ec":"#fdecea"}}><td style={{padding:"8px 10px",fontWeight:700,fontSize:13,borderTop:`2px solid ${vCor(adj>=0?1:-1)}`,borderBottom:`2px solid ${vCor(adj>=0?1:-1)}`,color:vCor(adj>=0?1:-1)}}>{adj>=0?"Saldo considerando inconsistências":"Falta pagar considerando inconsistências"}</td><td style={{padding:"8px 10px",fontWeight:800,fontSize:15,borderTop:`2px solid ${vCor(adj>=0?1:-1)}`,borderBottom:`2px solid ${vCor(adj>=0?1:-1)}`,color:vCor(adj>=0?1:-1),...pR}}>{fB(Math.abs(adj))}</td></tr>
+      </>);})()}
+    </tbody></table>)}
+    {incErr&&(<div style={{marginTop:24,breakInside:"avoid"}}>
+      <div style={{fontSize:14,fontWeight:700,marginBottom:2}}>Inconsistências pendentes (erros)</div>
+      <div style={{fontSize:10,color:"#555",marginBottom:6}}>Valores das inconsistências do tipo erro ainda não tratadas, de qualquer mês.</div>
+      {incErr.length?(<table style={{width:"100%",borderCollapse:"collapse"}}>
+        <tbody>{incErr.map(({it,x})=>(<tr key={it.key}><td style={{...pTd,fontWeight:600,width:"34%"}}>{it.title}</td><td style={pTd}>{x.txt}</td><td style={{...pTd,...pR,fontWeight:700,color:vCor(x.v)}}>{x.v>0?"+":"−"} {fB(Math.abs(x.v))}<div style={{fontSize:9,fontWeight:400}}>{x.v>0?"pago a mais":"pago a menos"}</div></td></tr>))}</tbody>
+        <tfoot>{(()=>{const ma=incErr.filter(e=>e.x.v>0).reduce((s,e)=>s+e.x.v,0),me=incErr.filter(e=>e.x.v<0).reduce((s,e)=>s-e.x.v,0);return(<>
+          <tr><td style={pTf} colSpan={2}>Total pago a mais</td><td style={{...pTf,...pR,color:vCor(1)}}>+ {fB(ma)}</td></tr>
+          <tr><td style={{...pTd,fontWeight:700}} colSpan={2}>Total pago a menos</td><td style={{...pTd,...pR,fontWeight:700,color:vCor(-1)}}>− {fB(me)}</td></tr>
+          <tr><td style={{...pTd,fontWeight:700}} colSpan={2}>Saldo das inconsistências</td><td style={{...pTd,...pR,fontWeight:700,color:Math.abs(ma-me)<.005?"#111":vCor(ma-me)}}>{ma-me>=0?"+":"−"} {fB(Math.abs(ma-me))}</td></tr>
+        </>);})()}</tfoot>
+      </table>):(<div style={{fontSize:11,color:"#555"}}>Nenhuma inconsistência do tipo erro pendente.</div>)}
+    </div>)}
+  </ReportDoc>);
+}
+// Impressão rápida do Dashboard: lançamentos, com opção de incluir as baixas
+function PrintMonth({sm,ps,baixas,mt,onClose}){
+  const[withBx,setWithBx]=useState(false);
+  return(<PrintShell docName={pdfName(monthTitle(true,withBx),sm)} onClose={onClose} controls={<label style={{display:"flex",alignItems:"center",gap:8,fontSize:12,color:Z.tx,cursor:"pointer"}}><input type="checkbox" checked={withBx} onChange={e=>setWithBx(e.target.checked)} style={{width:16,height:16,accentColor:Z.ac2}}/>Incluir as baixas do mês</label>}>
+    <MonthSheet {...{sm,ps,baixas,mt}} showL={true} showB={withBx}/>
+  </PrintShell>);
+}
+
+// Verificações de consistência dos dados
+const mIdx=m=>MO.indexOf(m);
+const nrm=s=>s.normalize("NFD").replace(/[̀-ͯ]/g,"").toLowerCase().replace(/[^a-z0-9 ]/g," ").split(/\s+/).filter(w=>w&&!["de","da","das","do","dos","e"].includes(w));
+// Parecidos: todas as palavras (2+ letras) de um nome aparecem no outro, inteiras ou abreviadas, com ao menos uma de 3+ letras
+function similarNames(a,b){const A=nrm(a).filter(w=>w.length>=2),B=nrm(b).filter(w=>w.length>=2);if(!A.length||!B.length)return false;const sub=(s,l)=>s.every(w=>l.some(x=>x===w||x.startsWith(w)))&&s.some(w=>w.length>=3);return sub(A,B)||sub(B,A);}
+function findIncons(ps,baixas){
+  const out=[];const add=(sev,cat,title,detail,kp)=>out.push({sev,cat,title,detail,key:cat+"|"+kp});
+  ps.forEach(p=>{
+    const k=Object.keys(p.monthly||{}).sort((a,b)=>mIdx(a)-mIdx(b));const vals=k.map(m=>p.monthly[m]);const n=k.length;
+    const soma=Math.round(vals.reduce((s,v)=>s+v,0)*100)/100;const lbl=`${p.loja} (${fD(p.data)}) – id ${p.id}`;
+    // entrada + parcelas iguais (ex.: Iphone): não é inconsistência
+    const entrada=n===p.parcelas+1&&Math.abs(soma-p.total)<=0.1&&vals.slice(1).every(v=>v===vals[1])&&vals[0]!==vals[1];
+    // Parcelas × meses já explica a diferença de soma: uma compra gera um só erro
+    if(!entrada&&n!==p.parcelas)add("Erro","Parcelas × meses lançados",lbl,`${p.parcelas} parcelas, mas ${n} meses lançados (${k.join(", ")}). Meses somam ${fB(soma)}; total da compra ${fB(p.total)}.`,"p"+p.id);
+    else if(!entrada&&Math.abs(soma-p.total)>Math.max(.05,.01*n))add("Erro","Soma das parcelas × total",lbl,`Meses somam ${fB(soma)}; total da compra ${fB(p.total)} (diferença ${fB(Math.abs(soma-p.total))}).`,"p"+p.id);
+    if(k.some((m,i)=>i&&mIdx(m)-mIdx(k[i-1])!==1))add("Erro","Meses fora de sequência",lbl,`Meses lançados: ${k.join(", ")}.`,"p"+p.id);
+    if(vals.some(v=>!(v>0)))add("Erro","Valor inválido",lbl,"Há parcela com valor zero ou negativo.","p"+p.id);
+    if(!p.data)add("Atenção","Compra sem data",lbl,`Primeiro mês lançado: ${k[0]||"—"}.`,"p"+p.id);
+    else if(!dKey(p))add("Erro","Data da compra inválida",lbl,`Data registrada: "${p.data}".`,"p"+p.id);
+  });
+  Object.keys(baixas).sort((a,b)=>mIdx(a)-mIdx(b)).forEach(m=>{
+    const mi=mIdx(m);const seen={};
+    (baixas[m]||[]).forEach((b,i)=>{
+      const lbl=`Baixa ${i+1} de ${m}`;const bk=`${m}|${b.date}|${b.amount}`;const d=/^(\d{2})\/(\d{2})\/(\d{4})$/.exec(b.date||"");
+      if(!(b.amount>0))add("Erro","Valor inválido",lbl,`Valor: ${fB(b.amount)}.`,bk);
+      if(!d)add("Erro","Data de baixa inválida",lbl,`Data registrada: "${b.date}".`,bk);
+      else{const j=mIdx(`${MN[+d[2]-1]}/${d[3]}`);if(j!==mi&&j!==mi-1)add("Erro","Baixa fora do período da fatura",lbl,`${fB(b.amount)} pago em ${b.date}; esperado entre o mês anterior e ${m}.`,bk);}
+      const key=b.amount+"|"+b.date;seen[key]=(seen[key]||0)+1;if(seen[key]===2)add("Atenção","Possível baixa duplicada",`Baixas de ${m}`,`Mais de uma baixa de ${fB(b.amount)} em ${fD(b.date)}. Confirme se foram pagamentos distintos.`,bk);
+    });
+  });
+  const names=[...new Set(ps.map(p=>p.loja))].sort();const used=new Set();
+  names.forEach(a=>{if(used.has(a))return;const g=names.filter(b=>b!==a&&!used.has(b)&&similarNames(a,b));if(g.length){[a,...g].forEach(x=>used.add(x));add("Atenção","Nomes de loja parecidos",[a,...g].join(" / "),"Podem ser a mesma loja escrita de formas diferentes.",[a,...g].join("/"));}});
+  return[...out.filter(i=>i.sev==="Erro"),...out.filter(i=>i.sev!=="Erro")];
+}
+// Análise automática de cada inconsistência: o que provavelmente ocorreu e o que fazer
+function explainIncon(it,ps,baixas){
+  const kp=it.key.slice(it.cat.length+1);const r2=v=>Math.round(v*100)/100;
+  const prov=m=>r2(ps.reduce((s,p)=>s+(p.monthly[m]||0),0));const pago=m=>r2((baixas[m]||[]).reduce((s,b)=>s+b.amount,0));
+  const nxt=(m,k)=>MO[mIdx(m)+k];const lst=a=>a.length>1?a.slice(0,-1).join(", ")+" e "+a[a.length-1]:a[0]||"";
+  const P=kp.startsWith("p")?ps.find(p=>String(p.id)===kp.slice(1)):null;
+  if(P){
+    const k=Object.keys(P.monthly).sort((a,b)=>mIdx(a)-mIdx(b));const n=k.length;const vals=k.map(m=>P.monthly[m]);const soma=r2(vals.reduce((s,v)=>s+v,0));
+    const vp=r2(P.total/(P.parcelas||1));const out=[];
+    const irmas=ps.filter(x=>x.id!==P.id&&x.loja===P.loja);
+    const moda=(()=>{const c={};irmas.forEach(x=>{c[x.parcelas]=(c[x.parcelas]||0)+1;});const e=Object.entries(c).sort((a,b)=>b[1]-a[1])[0];return e&&e[1]>=2?{n:+e[0],q:e[1]}:null;})();
+    const mesmoDia=irmas.filter(x=>x.data&&x.data===P.data);
+    if(it.cat==="Parcelas × meses lançados"||it.cat==="Soma das parcelas × total"){
+      if(n<P.parcelas){
+        const falt=[];for(let i=1;i<=P.parcelas-n;i++)falt.push(nxt(k[n-1],i));
+        out.push(`Foram lançadas ${n} de ${P.parcelas} parcelas. ${falt.length>1?"Faltam":"Falta"} ${falt.length} parcela${falt.length>1?"s":""} de ${fB(vp)}, que ${falt.length>1?"cairiam":"cairia"} em ${lst(falt)}; por isso os meses somam ${fB(soma)} e não ${fB(P.total)}.`);
+        falt.forEach(m=>{const sd=r2(pago(m)-prov(m));out.push(sd>=vp-1?`Em ${m} as baixas superam a provisão em ${fB(sd)}, o que é compatível com essa parcela ter sido cobrada e paga.`:`Em ${m} as baixas ${sd>=0?`superam a provisão em só ${fB(sd)}`:`ficaram ${fB(-sd)} abaixo da provisão`}, o que não indica pagamento dessa parcela.`);});
+        if(moda)out.push(`As demais compras nesta loja costumam ser em ${moda.n}x (${moda.q} compras)${moda.n===P.parcelas?", o que reforça que faltou lançar":""}.`);
+        out.push(`O que fazer: confira a fatura de ${lst(falt)}. Se a parcela aparece, lance-a; se não, ajuste a compra para ${n} parcelas com total de ${fB(soma)}.`);
+      }else if(n>P.parcelas){
+        const ent=n===P.parcelas+1&&vals.slice(1).every(v=>v===vals[1])&&vals[0]!==vals[1];
+        const extra=k.slice(P.parcelas);
+        out.push(`Há ${n} meses lançados para ${P.parcelas} parcelas: ${extra.length>1?"os meses":"o mês"} ${lst(extra)} ${extra.length>1?"excedem":"excede"} o parcelamento, somando ${fB(soma)} contra um total de ${fB(P.total)}.`);
+        if(Math.abs(P.parcelas*vals[0]-P.total)<=.1&&!ent)out.push(`O total registrado corresponde exatamente a ${P.parcelas} × ${fB(vals[0])}, o que sugere lançamento a mais.`);
+        extra.forEach(m=>{const sd=r2(pago(m)-prov(m));if(Math.abs(sd)<.01)out.push(`Por outro lado, as baixas de ${m} fecham exatamente com a provisão contando essa parcela. Isso pode indicar que ela foi cobrada, ou apenas que o pagamento seguiu o valor mostrado pelo sistema.`);});
+        if(mesmoDia.length)out.push(`No mesmo dia há outra compra nesta loja (${mesmoDia.map(x=>`${fB(x.total)} em ${x.parcelas}x`).join("; ")}); vale conferir se não houve troca entre elas.`);
+        out.push(`O que fazer: confira a fatura de ${lst(extra)}. Se a parcela não aparece, retire ${extra.length>1?"esses meses":"esse mês"}; se aparece, ajuste para ${n} parcelas com total de ${fB(soma)}.`);
+      }else{
+        out.push(`O número de parcelas confere, mas os valores mensais somam ${fB(soma)} em vez de ${fB(P.total)} (diferença de ${fB(Math.abs(soma-P.total))}). Provável erro de digitação no total ou em algum valor mensal.`);
+      }
+      return out.join(" ");
+    }
+    if(it.cat==="Meses fora de sequência"){const gaps=[];k.forEach((m,i)=>{if(i)for(let j=mIdx(k[i-1])+1;j<mIdx(m);j++)gaps.push(MO[j]);});return`A sequência de parcelas pula ${lst(gaps)}. Normalmente as parcelas caem em meses seguidos; provavelmente uma parcela foi lançada no mês errado. O que fazer: confira na fatura em que meses as parcelas foram cobradas.`;}
+    if(it.cat==="Valor inválido")return"Há parcela com valor zero ou negativo, o que não ocorre numa compra parcelada. Provável erro de digitação; corrija o valor ou exclua o mês.";
+    if(it.cat==="Compra sem data"){const f=k[0];const q=pmk(f);const pm=q.month?q.month:12,py=q.month?q.year:q.year-1;const d2=x=>String(x).padStart(2,"0");return`Lançamento antigo, importado da planilha, sem a data da compra. Pela regra de fechamento (dia 19), a primeira parcela em ${f} indica compra feita aproximadamente entre 19/${d2(pm)}/${py} e 18/${d2(q.month+1)}/${q.year}. Não afeta os valores; se tiver o comprovante, informe a data, ou marque como tratada.`;}
+    if(it.cat==="Data da compra inválida")return`A data "${P.data}" não está no formato dd/mm/aaaa (provável erro de digitação, como barra faltando). Não afeta os valores, mas atrapalha a ordenação. O que fazer: corrija a data na compra.`;
+  }
+  const bm=/^(.+?\/\d{4})\|(.*)\|(-?[\d.]+)$/.exec(kp);
+  if(bm){const[,m,date,amt]=bm;const v=+amt;
+    if(it.cat==="Possível baixa duplicada"){const q=(baixas[m]||[]).filter(b=>b.date===date&&b.amount===v).length;const sd=r2(pago(m)-prov(m));
+      return`Há ${q} baixas de ${fB(v)} em ${fD(date)} na fatura de ${m}. As baixas do mês somam ${fB(pago(m))} para uma provisão de ${fB(prov(m))} (${sd>=0?`excedente de ${fB(sd)}`:`faltam ${fB(-sd)}`}). ${sd>=v-.01?`Como o excedente cobre um desses pagamentos, é provável que um deles esteja repetido.`:`Como o mês não ficou com excedente desse valor, provavelmente foram dois pagamentos distintos no mesmo dia.`} O que fazer: confira no extrato e exclua a repetida, ou marque como tratada.`;}
+    if(it.cat==="Baixa fora do período da fatura"){const d=date.split("/");const inv=`${d[1]}/${d[0]}/${d[2]}`;const ok=x=>{const p=x.split("/");const j=mIdx(`${MN[+p[1]-1]}/${p[2]}`);return j===mIdx(m)||j===mIdx(m)-1;};
+      const sug=(+d[1]<=12&&+d[0]<=12&&ok(inv))?`Com dia e mês invertidos (${inv}) a data cairia no período, então é provável inversão.`:ok(`${d[0]}/${d[1]}/${+d[2]-1}`)?`Com o ano anterior (${d[0]}/${d[1]}/${+d[2]-1}) a data cairia no período, então é provável erro no ano.`:"Pode ter sido lançada na fatura errada.";
+      return`O pagamento de ${fB(v)} em ${date} está fora do período usual da fatura de ${m} (mês anterior ou o próprio mês). ${sug} O que fazer: corrija a data ou mova a baixa para a fatura certa.`;}
+    if(it.cat==="Data de baixa inválida")return`A data "${date}" não está no formato dd/mm/aaaa. Provável erro de digitação; corrija a data da baixa.`;
+    if(it.cat==="Valor inválido")return`Baixa com valor ${fB(v)}, o que não representa um pagamento. Corrija o valor ou exclua a baixa.`;
+  }
+  if(it.cat==="Nomes de loja parecidos"){const ns=kp.split("/");return`Nomes encontrados: ${ns.map(x=>`${x} (${ps.filter(p=>p.loja===x).length} compra${ps.filter(p=>p.loja===x).length!==1?"s":""})`).join(", ")}. Se forem a mesma loja, unifique o nome para os relatórios e o ranking somarem corretamente; se não, marque como tratada.`;}
+  return"";
+}
+// Impacto em valor: v>0 pago a mais, v<0 pago a menos (null quando não se aplica)
+function impactIncon(it,ps,baixas){
+  const kp=it.key.slice(it.cat.length+1);const r2=v=>Math.round(v*100)/100;
+  if(kp.startsWith("p")&&(it.cat==="Parcelas × meses lançados"||it.cat==="Soma das parcelas × total")){
+    const P=ps.find(p=>String(p.id)===kp.slice(1));if(!P)return null;const soma=r2(Object.values(P.monthly).reduce((s,v)=>s+v,0));const d=r2(soma-P.total);
+    return d?{v:d,ref:`p${P.id}`,txt:d>0?`Lançado ${fB(d)} além do total da compra`:`Faltou lançar ${fB(-d)} do total da compra`}:null;
+  }
+  const bm=/^(.+?\/\d{4})\|/.exec(kp);
+  if(bm&&it.cat==="Possível baixa duplicada"){const m=bm[1];const pv=r2(ps.reduce((s,p)=>s+(p.monthly[m]||0),0));const pg=r2((baixas[m]||[]).reduce((s,b)=>s+b.amount,0));const d=r2(pg-pv);
+    return Math.abs(d)>=.01?{v:d,ref:`m${m}`,txt:`Saldo de ${m}: pago ${fB(pg)} para provisão de ${fB(pv)}`}:null;}
+  return null;
+}
+// Competência do relatório de inconsistências: do mês mais antigo ao mais recente envolvido
+function compInc(items,ps){const ms=[];items.forEach(i=>{const kp=i.key.slice(i.cat.length+1);const m=/^(.+?\/\d{4})\|/.exec(kp);if(m)ms.push(m[1]);const P=kp.startsWith("p")&&ps.find(p=>String(p.id)===kp.slice(1));if(P)ms.push(...Object.keys(P.monthly));});
+  return ms.length?(()=>{const s=[...new Set(ms)].sort((a,b)=>mIdx(a)-mIdx(b));return s.length>1?`${s[0]} a ${s[s.length-1]}`:s[0];})():"Todos os meses";}
+const vCor=v=>v>0?"#0a7d3c":"#c62828";
+function IncSheet({items,ps,baixas}){
+  const cats=[...new Set(items.map(i=>i.cat))];
+  // consolidação: cada compra/mês conta uma vez
+  const imp={};items.forEach(i=>{const x=impactIncon(i,ps,baixas);if(x&&!imp[x.ref])imp[x.ref]=x;});
+  const vals=Object.values(imp);const mais=vals.filter(x=>x.v>0).reduce((s,x)=>s+x.v,0),menos=vals.filter(x=>x.v<0).reduce((s,x)=>s-x.v,0);
+  const semOQF=t=>t.replace(/\s*O que fazer:.*$/,"");
+  return(<ReportDoc title="Relatório de Inconsistências" comp={compInc(items,ps)}>
+    {!items.length&&<div style={{fontSize:12}}>Nenhuma inconsistência encontrada.</div>}
+    {items.length>0&&<div style={{fontSize:11,color:"#333",marginBottom:12}}>{items.filter(i=>i.sev==="Erro").length} erro(s) e {items.filter(i=>i.sev==="Atenção").length} ponto(s) de atenção.</div>}
+    {cats.map(c=>{const l=items.filter(i=>i.cat===c);return(<div key={c} style={{marginBottom:16}}>
+      <div style={{fontSize:13,fontWeight:700,marginBottom:4}}>{c} <span style={{fontWeight:400,color:"#555"}}>({l.length}) – {l[0].sev}</span></div>
+      <table style={{width:"100%",borderCollapse:"collapse"}}><tbody>{l.map((i,k)=>{const ex=semOQF(explainIncon(i,ps,baixas));const x=impactIncon(i,ps,baixas);return(<tr key={k} style={{breakInside:"avoid"}}>
+        <td style={{...pTd,width:"30%",fontWeight:600}}>{i.title}</td>
+        <td style={pTd}>{i.detail}{ex&&<div style={{marginTop:5,padding:"6px 8px",background:"#f4f1fb",borderLeft:"3px solid #7c3aed",fontSize:10.5,lineHeight:1.45,color:"#222"}}><b>Análise automática:</b> {ex}</div>}</td>
+        <td style={{...pTd,...pR,width:"17%"}}>{x?(<><div style={{fontWeight:700,color:vCor(x.v)}}>{x.v>0?"+":"−"} {fB(Math.abs(x.v))}</div><div style={{fontSize:9,color:vCor(x.v)}}>{x.v>0?"pago a mais":"pago a menos"}</div></>):<span style={{color:"#999"}}>—</span>}</td>
+      </tr>);})}</tbody></table>
+    </div>);})}
+    {items.length>0&&(<div style={{marginTop:8,breakInside:"avoid"}}>
+      <div style={{fontSize:13,fontWeight:700,marginBottom:4,borderTop:"2px solid #111",paddingTop:10}}>Consolidação dos valores</div>
+      <div style={{fontSize:10,color:"#555",marginBottom:6}}>Cada compra e cada mês entram uma única vez, mesmo que apareçam em mais de uma inconsistência.</div>
+      <table style={{marginLeft:"auto",borderCollapse:"collapse",fontSize:12,minWidth:300}}><tbody>
+        <tr><td style={{padding:"4px 10px"}}>Total pago a mais</td><td style={{padding:"4px 0",...pR,fontWeight:700,color:vCor(1)}}>+ {fB(mais)}</td></tr>
+        <tr><td style={{padding:"4px 10px"}}>Total pago a menos</td><td style={{padding:"4px 0",...pR,fontWeight:700,color:vCor(-1)}}>− {fB(menos)}</td></tr>
+        <tr><td style={{padding:"5px 10px",fontWeight:700,borderTop:"1px solid #333"}}>Saldo ({mais-menos>=0?"a mais":"a menos"})</td><td style={{padding:"5px 0",...pR,fontWeight:700,borderTop:"1px solid #333",color:Math.abs(mais-menos)<.005?"#111":vCor(mais-menos)}}>{mais-menos>=0?"+":"−"} {fB(Math.abs(mais-menos))}</td></tr>
+      </tbody></table>
+    </div>)}
+  </ReportDoc>);
+}
+// Aba Relatórios
+function Relat({ps,baixas,mt,am,incOk}){
+  const months=[...am].reverse();
+  const[m,setM]=useState(am.includes(cmk())?cmk():months[0]);const[tipo,setTipo]=useState("ambos");const[open,setOpen]=useState(null);const[comInc,setComInc]=useState(false);
+  // erros pendentes com valor (cada compra/mês uma vez)
+  const incErr=useMemo(()=>{const seen={};return findIncons(ps,baixas).filter(i=>i.sev==="Erro"&&!(incOk||{})[i.key]).map(it=>({it,x:impactIncon(it,ps,baixas)})).filter(e=>e.x&&!seen[e.x.ref]&&(seen[e.x.ref]=1));},[ps,baixas,incOk]);
+  const card={background:Z.cd,border:`1px solid ${Z.bd}`,borderRadius:10,padding:16,marginBottom:18};
+  const sel={background:Z.cd2,color:Z.tx,border:`1px solid ${Z.bd}`,borderRadius:6,padding:"6px 9px",fontSize:12,fontFamily:Z.ft};
+  const btn={background:`linear-gradient(135deg,${Z.ac3},${Z.ac2})`,color:"#fff",border:"none",borderRadius:6,padding:"8px 16px",fontSize:12,fontWeight:600,cursor:"pointer",fontFamily:Z.ft};
+  const tipos=[["ambos","Lançamentos e baixas"],["lanc","Só lançamentos"],["bx","Só baixas"]];
+  return(<div>
+    <div style={card}>
+      <div style={{fontSize:12,fontWeight:600,color:Z.ac,marginBottom:12}}>Lançamentos e baixas do mês</div>
+      <div style={{display:"flex",gap:14,flexWrap:"wrap",alignItems:"center",marginBottom:14}}>
+        <label style={{fontSize:11,color:Z.tx2,display:"flex",alignItems:"center",gap:6}}>Mês<select value={m} onChange={e=>setM(e.target.value)} style={sel}>{months.map(x=><option key={x} value={x}>{x}</option>)}</select></label>
+        <div style={{display:"flex",gap:12,flexWrap:"wrap"}}>{tipos.map(([v,l])=>(<label key={v} style={{fontSize:12,color:Z.tx,display:"flex",alignItems:"center",gap:5,cursor:"pointer"}}><input type="radio" name="tipo" checked={tipo===v} onChange={()=>setTipo(v)} style={{accentColor:Z.ac2}}/>{l}</label>))}</div>
+      </div>
+      <label style={{display:"flex",alignItems:"center",gap:8,fontSize:12,color:Z.tx,cursor:"pointer",marginBottom:14}}><input type="checkbox" checked={comInc} onChange={e=>setComInc(e.target.checked)} style={{width:16,height:16,accentColor:Z.ac2}}/>Incluir os valores das inconsistências do tipo erro</label>
+      <button onClick={()=>setOpen("mes")} style={btn}>Visualizar e imprimir</button>
+    </div>
+    {open==="mes"&&<PrintShell docName={pdfName(monthTitle(tipo!=="bx",tipo!=="lanc"),m)} onClose={()=>setOpen(null)}><MonthSheet sm={m} {...{ps,baixas,mt}} showL={tipo!=="bx"} showB={tipo!=="lanc"} incErr={comInc?incErr:null}/></PrintShell>}
+  </div>);
+}
+
+// Aba Inconsistências (só admin): seleção para impressão e marcação de tratadas
+function Incons({ps,baixas,incOk,setIncOk,user}){
+  const all=useMemo(()=>findIncons(ps,baixas),[ps,baixas]);
+  const[filtro,setFiltro]=useState("pend");const[sev,setSev]=useState("all");const[sel,setSel]=useState({});const[exp,setExp]=useState({});const[open,setOpen]=useState(false);
+  const pend=all.filter(i=>!incOk[i.key]);const trat=all.filter(i=>incOk[i.key]);
+  const list=(filtro==="pend"?pend:filtro==="trat"?trat:all).filter(i=>sev==="all"||i.sev===sev);
+  const selList=all.filter(i=>sel[i.key]);
+  // ao abrir ou trocar de filtro, a lista exibida vem toda selecionada
+  const listKey=list.map(i=>i.key).join(",");
+  useEffect(()=>{setSel(Object.fromEntries(list.map(i=>[i.key,true])));},[filtro,sev,listKey]);
+  const toggleOk=i=>setIncOk(o=>{const n={...o};if(n[i.key])delete n[i.key];else n[i.key]={by:user?.email||"",ts:new Date().toISOString(),label:`${i.cat}: ${i.title}`};return n;});
+  const nErr=pend.filter(i=>i.sev==="Erro").length,nAt=pend.length-nErr;
+  const card={background:Z.cd,border:`1px solid ${Z.bd}`,borderRadius:10,padding:16,marginBottom:18};
+  const btn={background:`linear-gradient(135deg,${Z.ac3},${Z.ac2})`,color:"#fff",border:"none",borderRadius:6,padding:"7px 14px",fontSize:11,fontWeight:600,cursor:"pointer",fontFamily:Z.ft};
+  const btn2={background:Z.cd2,color:Z.tx2,border:`1px solid ${Z.bd}`,borderRadius:6,padding:"7px 12px",fontSize:11,cursor:"pointer",fontFamily:Z.ft};
+  const fmt=t=>new Date(t).toLocaleString("pt-BR",{day:"2-digit",month:"2-digit",year:"numeric",hour:"2-digit",minute:"2-digit"});
+  return(<div style={card}>
+    <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",gap:8,flexWrap:"wrap",marginBottom:8}}>
+      <div style={{fontSize:12,fontWeight:600,color:Z.ac}}>Análise de inconsistências</div>
+      <span style={{fontSize:11,color:Z.tx2}}>Pendentes: <span style={{color:nErr?Z.rd:Z.gn,fontWeight:600}}>{nErr} erro{nErr!==1?"s":""}</span> · <span style={{color:nAt?Z.yl:Z.gn,fontWeight:600}}>{nAt} atenção</span> · <span style={{color:Z.gn}}>{trat.length} tratada{trat.length!==1?"s":""}</span></span>
+    </div>
+    <div style={{fontSize:10,color:Z.tx3,marginBottom:12}}>Marque "Tratada" quando o caso estiver resolvido ou confirmado como correto: ele sai das contagens e do relatório, mas continua disponível no filtro "Tratadas". Use a caixa da esquerda para escolher o que imprimir.</div>
+    <div style={{display:"flex",gap:6,flexWrap:"wrap",alignItems:"center",marginBottom:10}}>
+      {[["pend",`Pendentes (${pend.length})`],["trat",`Tratadas (${trat.length})`],["all",`Todas (${all.length})`]].map(([v,l])=>(<button key={v} onClick={()=>setFiltro(v)} style={{...btn2,background:filtro===v?`${Z.ac3}30`:Z.cd2,color:filtro===v?Z.ac:Z.tx2}}>{l}</button>))}
+      <select value={sev} onChange={e=>setSev(e.target.value)} style={{...btn2,color:sev==="Erro"?Z.rd:sev==="Atenção"?Z.yl:Z.tx2}}><option value="all">Erros e atenção</option><option value="Erro">Só erros</option><option value="Atenção">Só atenção</option></select>
+      <span style={{flex:1}}/>
+      <button onClick={()=>setSel(s=>{const n={...s};const allSel=list.every(i=>n[i.key]);list.forEach(i=>{if(allSel)delete n[i.key];else n[i.key]=true;});return n;})} style={btn2}>{list.length&&list.every(i=>sel[i.key])?"Desmarcar":"Selecionar"} todas da lista</button>
+      <button disabled={!selList.length} onClick={()=>setOpen(true)} style={{...btn,opacity:selList.length?1:.4,cursor:selList.length?"pointer":"not-allowed"}}>Imprimir selecionadas ({selList.length})</button>
+    </div>
+    {list.map(i=>{const ok=incOk[i.key];return(<div key={i.key} style={{display:"flex",gap:10,alignItems:"flex-start",padding:"9px 0",borderTop:`1px solid ${Z.bd}`,fontSize:11,opacity:ok?.6:1}}>
+      <input type="checkbox" title="Selecionar para impressão" checked={!!sel[i.key]} onChange={()=>setSel(s=>({...s,[i.key]:!s[i.key]}))} style={{width:16,height:16,marginTop:1,accentColor:Z.ac2,flexShrink:0}}/>
+      <div style={{flex:1,minWidth:0}}>
+        <div style={{display:"flex",gap:6,alignItems:"center",flexWrap:"wrap"}}><span style={{fontSize:9,fontWeight:700,padding:"1px 6px",borderRadius:4,background:i.sev==="Erro"?`${Z.rd}25`:`${Z.yl}25`,color:i.sev==="Erro"?Z.rd:Z.yl}}>{i.sev}</span><span style={{color:Z.tx2}}>{i.cat}</span><span style={{marginLeft:"auto"}}><label style={{display:"flex",alignItems:"center",gap:5,fontSize:10,color:ok?Z.gn:Z.tx2,cursor:"pointer",whiteSpace:"nowrap",padding:"2px 0"}}><input type="checkbox" checked={!!ok} onChange={()=>toggleOk(i)} style={{width:15,height:15,accentColor:Z.gn}}/>Tratada</label></span></div>
+        <div style={{marginTop:3,color:Z.tx,fontWeight:500}}>{i.title}</div><div style={{color:Z.tx2,marginTop:1}}>{i.detail}</div>
+        <button onClick={()=>setExp(e=>({...e,[i.key]:!e[i.key]}))} style={{background:"none",border:"none",color:Z.ac,fontSize:10,padding:"3px 0 0",cursor:"pointer",fontFamily:Z.ft}}>{exp[i.key]?"▾ Ocultar análise":"▸ Ver análise"}</button>
+        {exp[i.key]&&<div style={{marginTop:4,padding:"7px 9px",background:Z.cd2,borderLeft:`3px solid ${Z.ac3}`,borderRadius:4,color:Z.tx,fontSize:10.5,lineHeight:1.5}}>{explainIncon(i,ps,baixas)}</div>}
+        {ok&&<div style={{color:Z.gn,fontSize:10,marginTop:3}}>Tratada em {fmt(ok.ts)}{ok.by?` por ${ok.by}`:""}</div>}
+      </div>
+    </div>);})}
+    {!list.length&&<div style={{fontSize:11,color:Z.gn,padding:"8px 0"}}>{filtro==="trat"?"Nenhuma inconsistência tratada ainda.":"Nenhuma inconsistência pendente."}</div>}
+    {open&&<PrintShell docName={pdfName("Relatório de Inconsistências",compInc(selList,ps))} onClose={()=>setOpen(false)}><IncSheet items={selList} {...{ps,baixas}}/></PrintShell>}
+  </div>);
+}
+
 function Hist({history}){
   const[n,setN]=useState(50);const list=[...history].reverse();
   const fmt=t=>new Date(t).toLocaleString("pt-BR",{day:"2-digit",month:"2-digit",year:"numeric",hour:"2-digit",minute:"2-digit"});
@@ -225,7 +514,7 @@ function Hist({history}){
 
 function App(){
   const[user,setUser]=useState(null);const[role,setRole]=useState(null);const[authLoading,setAuthLoading]=useState(true);const[authError,setAuthError]=useState(null);
-  const[ps,setPs]=useState([]);const[ppl,setPpl]=useState({});const[baixas,setBaixas]=useState({});const[ok,setOk]=useState(false);const[saving,setSaving]=useState(false);const[lastUpdate,setLastUpdate]=useState(null);const[loadErr,setLoadErr]=useState(null);const[history,setHistory]=useState([]);
+  const[ps,setPs]=useState([]);const[ppl,setPpl]=useState({});const[baixas,setBaixas]=useState({});const[ok,setOk]=useState(false);const[saving,setSaving]=useState(false);const[lastUpdate,setLastUpdate]=useState(null);const[loadErr,setLoadErr]=useState(null);const[history,setHistory]=useState([]);const[incOk,setIncOk]=useState({});
   const[tab,setTab]=useState("dashboard");const[sm,setSm]=useState(cmk());const[sf,setSf]=useState(false);const[ep,setEp]=useState(null);const[sr,setSr]=useState("");const[toast,setToast]=useState(null);
   const isAdmin=role==="admin";
 
@@ -253,29 +542,29 @@ function App(){
   const svRef=useRef(null);const baseRef=useRef(null);const revRef=useRef(-1);const tr=useRef(null);
   const applyRemote=(d)=>{
     if(d.rev<=revRef.current)return;
-    revRef.current=d.rev;baseRef.current={purchases:d.purchases,people:d.people,baixas:d.baixas};
+    revRef.current=d.rev;baseRef.current={purchases:d.purchases,people:d.people,baixas:d.baixas,incOk:d.incOk};
     svRef.current=JSON.stringify(baseRef.current);
     if(tr.current){clearTimeout(tr.current);tr.current=null;}
-    setPs(fixTrunc(d.purchases));setPpl(d.people);setBaixas(d.baixas);setHistory(d.history);setLastUpdate(d.updatedAt);setOk(true);
+    setPs(fixTrunc(d.purchases));setPpl(d.people);setBaixas(d.baixas);setIncOk(d.incOk);setHistory(d.history);setLastUpdate(d.updatedAt);setOk(true);
   };
   useEffect(()=>{if(!user||!role)return;
-    if(!initFB()){(async()=>{const d=await ldLocal();const x=d||{purchases:SEED_P,people:SEED_PPL,baixas:SEED_BX,updatedAt:null,rev:0,history:[]};revRef.current=-1;applyRemote(x);})();return;}
+    if(!initFB()){(async()=>{const d=await ldLocal();const x=d||{purchases:SEED_P,people:SEED_PPL,baixas:SEED_BX,updatedAt:null,rev:0,history:[],incOk:{}};revRef.current=-1;applyRemote(x);})();return;}
     let unsub=null,cancel=false;
     (async()=>{try{const ref=await prepDoc();if(cancel)return;
       unsub=ref.onSnapshot(snap=>{
         if(!snap.exists){setLoadErr("Base de dados não encontrada");return;}
         const d=parseDoc(snap.data());
-        if(okRef.current&&d.rev>revRef.current&&JSON.stringify({purchases:d.purchases,people:d.people,baixas:d.baixas})!==JSON.stringify({purchases:ps0.current,people:ppl0.current,baixas:bx0.current}))tt("Dados atualizados em outro dispositivo");
+        if(okRef.current&&d.rev>revRef.current&&JSON.stringify({purchases:d.purchases,people:d.people,baixas:d.baixas,incOk:d.incOk})!==JSON.stringify({purchases:ps0.current,people:ppl0.current,baixas:bx0.current,incOk:inc0.current}))tt("Dados atualizados em outro dispositivo");
         applyRemote(d);
       },e=>setLoadErr(String(e?.code||e?.message||e)));
     }catch(e){setLoadErr(String(e?.code||e?.message||e));}})();
     return()=>{cancel=true;if(unsub)unsub();};
   },[user,role]);
-  const okRef=useRef(false);okRef.current=ok;const ps0=useRef(ps);ps0.current=ps;const ppl0=useRef(ppl);ppl0.current=ppl;const bx0=useRef(baixas);bx0.current=baixas;
+  const okRef=useRef(false);okRef.current=ok;const ps0=useRef(ps);ps0.current=ps;const ppl0=useRef(ppl);ppl0.current=ppl;const bx0=useRef(baixas);bx0.current=baixas;const inc0=useRef(incOk);inc0.current=incOk;
 
   // Gravação automática (só admin): só quando algo mudou de fato, com histórico
-  useEffect(()=>{if(!ok||!isAdmin)return;const snap=JSON.stringify({purchases:ps,people:ppl,baixas});if(snap===svRef.current)return;if(tr.current)clearTimeout(tr.current);
-    tr.current=setTimeout(async()=>{tr.current=null;const next={purchases:ps,people:ppl,baixas};const changes=diffData(baseRef.current,next);setSaving(true);
+  useEffect(()=>{if(!ok||!isAdmin)return;const snap=JSON.stringify({purchases:ps,people:ppl,baixas,incOk});if(snap===svRef.current)return;if(tr.current)clearTimeout(tr.current);
+    tr.current=setTimeout(async()=>{tr.current=null;const next={purchases:ps,people:ppl,baixas,incOk};const changes=diffData(baseRef.current,next);setSaving(true);
       try{
         if(!initFB()){const now=new Date().toISOString();await svLocal({...next,updatedAt:now});svRef.current=snap;baseRef.current=next;setLastUpdate(now);setHistory(h=>changes.length?[...h,{ts:now,user:user.email,changes}]:h);tt("Salvo localmente");return;}
         const r=await saveTx(next,Math.max(revRef.current,0),changes,user.email);
@@ -284,7 +573,7 @@ function App(){
         if(e?.code==="conflict"){tt("Os dados foram alterados em outro dispositivo. Sua última alteração não foi salva; confira e refaça.",6e3);const s2=await initFB().doc(DOC_PATH).get();revRef.current=-1;applyRemote(parseDoc(s2.data()));}
         else tt("Erro ao salvar: "+(e?.code||e?.message||e),6e3);
       }finally{setSaving(false);}
-    },.8e3);},[ps,ppl,baixas,ok]);
+    },.8e3);},[ps,ppl,baixas,incOk,ok]);
   const tt=(m,ms=2e3)=>{setToast(m);setTimeout(()=>setToast(null),ms);};
   const am=useMemo(()=>{const s=new Set([cmk()]);ps.forEach(p=>Object.keys(p.monthly).forEach(m=>s.add(m)));Object.keys(baixas).forEach(m=>{if((baixas[m]||[]).length)s.add(m);});return MO.filter(m=>s.has(m));},[ps,baixas]);
   const mt=useMemo(()=>{const t={};am.forEach(m=>{t[m]=0;});ps.forEach(p=>Object.entries(p.monthly).forEach(([m,v])=>{t[m]=(t[m]||0)+v;}));return t;},[ps,am]);
@@ -339,7 +628,16 @@ function App(){
   .bx-summary{flex-direction:column!important;align-items:flex-start!important;gap:4px!important}
   .modal-inner{width:95%!important;padding:16px!important;max-height:90vh;overflow-y:auto}
   table{font-size:9px!important}
-  .chart-wrap{overflow-x:auto;-webkit-overflow-scrolling:touch}
+  .chart-wrap{overflow-x:auto;-webkit-overflow-scrolling:touch;justify-content:flex-start!important}
+}
+@media print{
+  #root{display:none!important}
+  .no-print{display:none!important}
+  .print-modal{position:static!important;background:#fff!important;padding:0!important;overflow:visible!important}
+  .print-sheet{max-width:none!important;border-radius:0!important;padding:0!important}
+  body{background:#fff!important}
+  tr{break-inside:avoid}
+  @page{margin:14mm}
 }`}</style>
 
     <header style={{background:Z.cd,borderBottom:`1px solid ${Z.bd}`,padding:"13px 18px",display:"flex",alignItems:"center",justifyContent:"space-between",position:"sticky",top:0,zIndex:50,flexWrap:"wrap",gap:8}}>
@@ -361,11 +659,11 @@ function App(){
     </header>
 
     <nav style={{display:"flex",gap:1,padding:"0 18px",background:Z.cd,borderBottom:`1px solid ${Z.bd}`,overflowX:"auto",WebkitOverflowScrolling:"touch"}}>
-      {[["dashboard","Dashboard"],["purchases","Compras"],["baixas","Baixas"],/*["people","Terceiros"],*/["reports","Relatórios"],["history","Histórico"]].map(([id,lb])=>(<button key={id} onClick={()=>setTab(id)} style={{background:tab===id?Z.cd2:"transparent",color:tab===id?Z.ac:Z.tx2,border:"none",borderBottom:tab===id?`2px solid ${Z.ac2}`:"2px solid transparent",padding:"10px 13px",fontSize:11,fontWeight:500,cursor:"pointer"}}>{lb}</button>))}
+      {[["dashboard","Dashboard"],["purchases","Compras"],["baixas","Baixas"],/*["people","Terceiros"],*/["reports","Gráficos"],["relatorios","Relatórios"],...(isAdmin?[["incons","Inconsistências"]]:[]),["history","Histórico"]].map(([id,lb])=>(<button key={id} onClick={()=>setTab(id)} style={{background:tab===id?Z.cd2:"transparent",color:tab===id?Z.ac:Z.tx2,border:"none",borderBottom:tab===id?`2px solid ${Z.ac2}`:"2px solid transparent",padding:"10px 13px",fontSize:11,fontWeight:500,cursor:"pointer"}}>{lb}</button>))}
     </nav>
 
     <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",padding:"6px 18px",background:Z.bg,borderBottom:`1px solid ${Z.bd}`,fontSize:10,color:Z.tx3,flexWrap:"wrap",gap:4}}>
-      <span>Fechamento da fatura: <span style={{color:Z.yl,fontWeight:600}}>dia 19 de cada mês</span></span>
+      <span>Fechamento da fatura: <span style={{color:Z.yl,fontWeight:600}}>dia 19 de cada mês</span> <span style={{marginLeft:6,opacity:.7}}>· versão {APP_VERSION}</span></span>
       <span>Última atualização: <span style={{color:Z.ac,fontFamily:Z.mn}}>{lastUpdate?new Date(lastUpdate).toLocaleString("pt-BR",{day:"2-digit",month:"2-digit",year:"numeric",hour:"2-digit",minute:"2-digit"}):"—"}</span></span>
     </div>
 
@@ -375,6 +673,8 @@ function App(){
       {tab==="baixas"&&<BaixasView {...{baixas,setBaixas,mt,am,isAdmin}}/>}
       {/*tab==="people"&&<Ppl ppl={ppl} setPpl={setPpl} isAdmin={isAdmin}/>*/}
       {tab==="reports"&&<Rpts {...{ps,mt,am}}/>}
+      {tab==="relatorios"&&<Relat {...{ps,baixas,mt,am,incOk}}/>}
+      {tab==="incons"&&isAdmin&&<Incons {...{ps,baixas,incOk,setIncOk,user}}/>}
       {tab==="history"&&<Hist history={history}/>}
     </main>
 
@@ -388,7 +688,7 @@ function St({label,value,sub,color=Z.ac}){return(<div style={{background:Z.cd,bo
 
 function Dash({mt,sm,setSm,cmp,td,ap,am,ps,baixas,setBaixas,isAdmin}){
   const[selLoja,setSelLoja]=useState(null);
-  const[showAddBx,setShowAddBx]=useState(false);
+  const[showAddBx,setShowAddBx]=useState(false);const[showPrint,setShowPrint]=useState(false);
   const[bxAmt,setBxAmt]=useState("");
   const[bxDate,setBxDate]=useState("");
   const[bxErr,setBxErr]=useState({});
@@ -433,7 +733,8 @@ function Dash({mt,sm,setSm,cmp,td,ap,am,ps,baixas,setBaixas,isAdmin}){
   const bxES={fontSize:8,color:Z.rd,marginTop:1};
 
   return(<div>
-    <div style={{display:"flex",alignItems:"center",gap:8,marginBottom:18}}><select value={sm} onChange={e=>{setSm(e.target.value);setSelLoja(null);setShowAddBx(false);}} style={{background:Z.cd,color:Z.tx,border:`1px solid ${Z.bd}`,borderRadius:6,padding:"6px 9px",fontSize:12,fontWeight:500,cursor:"pointer",fontFamily:Z.ft}}>{[...am].reverse().map(m=><option key={m} value={m}>{m}</option>)}</select></div>
+    <div style={{display:"flex",alignItems:"center",gap:8,marginBottom:18}}><select value={sm} onChange={e=>{setSm(e.target.value);setSelLoja(null);setShowAddBx(false);}} style={{background:Z.cd,color:Z.tx,border:`1px solid ${Z.bd}`,borderRadius:6,padding:"6px 9px",fontSize:12,fontWeight:500,cursor:"pointer",fontFamily:Z.ft}}>{[...am].reverse().map(m=><option key={m} value={m}>{m}</option>)}</select><button onClick={()=>setShowPrint(true)} style={{background:Z.cd,color:Z.tx2,border:`1px solid ${Z.bd}`,borderRadius:6,padding:"6px 12px",fontSize:11,cursor:"pointer",fontFamily:Z.ft}}>🖨 Imprimir</button></div>
+    {showPrint&&<PrintMonth {...{sm,ps,baixas,mt}} onClose={()=>setShowPrint(false)}/>}
     <div className="stat-row" style={{display:"flex",gap:10,flexWrap:"wrap",marginBottom:18}}>
       <St label="Fatura do Mês" value={fB(c)} sub={df!==0?`${df>0?"▲":"▼"} ${Math.abs(df).toFixed(1)}%`:null} color={Z.ac}/>
       <St label="Baixas do Mês" value={fB(totalBaixas)} sub={`${mBaixas.length} pagamento${mBaixas.length!==1?"s":""}`} color={Z.gn}/>
@@ -480,7 +781,7 @@ function Dash({mt,sm,setSm,cmp,td,ap,am,ps,baixas,setBaixas,isAdmin}){
 
     <div style={{background:Z.cd,border:`1px solid ${Z.bd}`,borderRadius:10,padding:18,marginBottom:18}}>
       <div style={{fontSize:11,fontWeight:600,color:Z.ac,marginBottom:14}}>Evolução da Fatura</div>
-      <div className="chart-wrap" style={{display:"flex",alignItems:"flex-end",gap:1,height:140,justifyContent:"center"}}>
+      <div className="chart-wrap" style={{display:"flex",alignItems:"flex-end",gap:1,height:160,justifyContent:"center"}}>
         {cms.map(m=>{const v=mt[m]||0;const h=Math.max(3,(v/mx)*120);const s=m===sm;const p=pmk(m);return(<div key={m} onClick={()=>{setSm(m);setSelLoja(null);setShowAddBx(false);}} style={{flex:"1 1 0",maxWidth:60,display:"flex",flexDirection:"column",alignItems:"center",cursor:"pointer"}}><span style={{fontSize:8,color:s?Z.ac:Z.tx3,marginBottom:2,fontFamily:Z.mn}}>{v>999?`${(v/1e3).toFixed(0)}k`:v.toFixed(0)}</span><div style={{width:"80%",height:h,background:s?`linear-gradient(180deg,${Z.ac2},${Z.ac3})`:`linear-gradient(180deg,${Z.bd2},${Z.bd})`,borderRadius:"4px 4px 1px 1px",border:s?`1px solid ${Z.ac}`:`1px solid ${Z.bd}`,boxShadow:s?`0 0 10px ${Z.ac3}40`:"none",transition:"all .25s"}}/><span style={{fontSize:8,color:s?Z.tx:Z.tx3,marginTop:2}}>{p?`${MS[p.month]}/${String(p.year).slice(2)}`:""}</span></div>);})}
       </div>
     </div>
@@ -518,7 +819,7 @@ function Dash({mt,sm,setSm,cmp,td,ap,am,ps,baixas,setBaixas,isAdmin}){
           </div>
         </>):(<>
           <div style={{fontSize:11,fontWeight:600,color:Z.ac,marginBottom:12}}>Parcelas do Mês</div>
-          <div style={{maxHeight:220,overflowY:"auto"}}>{cmp.slice(0,12).map(p=>(<div key={p.id} style={{display:"flex",justifyContent:"space-between",padding:"5px 0",borderBottom:`1px solid ${Z.bd}`,fontSize:11}}><div><span>{p.loja}</span><span style={{color:Z.tx3,marginLeft:5,fontSize:9}}>{p.parcelas}x</span></div><span style={{fontFamily:Z.mn,color:Z.ac}}>{fB(p.monthly[sm])}</span></div>))}{cmp.length>12&&<div style={{color:Z.tx3,fontSize:10,padding:"4px 0"}}>+{cmp.length-12} mais</div>}</div>
+          <div>{[...cmp].sort((a,b)=>dKey(b)-dKey(a)).map(p=>(<div key={p.id} style={{display:"grid",gridTemplateColumns:"1fr auto auto",alignItems:"center",gap:10,padding:"5px 0",borderBottom:`1px solid ${Z.bd}`,fontSize:11}}><div style={{minWidth:0,overflow:"hidden",textOverflow:"ellipsis",whiteSpace:"nowrap"}}><span>{p.loja}</span><span style={{color:Z.tx3,marginLeft:5,fontSize:9}}>{p.parcelas}x</span></div><span style={{fontFamily:Z.mn,fontSize:10,color:Z.tx2}}>{fD(p.data)}</span><span style={{fontFamily:Z.mn,color:Z.ac,textAlign:"right"}}>{fB(p.monthly[sm])}</span></div>))}</div>
         </>)}
       </div>
     </div>
