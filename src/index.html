@@ -239,7 +239,7 @@ function SheetHead({title}){
   </div>);
 }
 // Folha do mês: lançamentos e/ou baixas
-function MonthSheet({sm,ps,baixas,mt,showL,showB}){
+function MonthSheet({sm,ps,baixas,mt,showL,showB,incErr}){
   const rows=ps.filter(p=>p.monthly[sm]>0).sort((a,b)=>dKey(b)-dKey(a)).map(p=>{const k=Object.keys(p.monthly).sort((x,y)=>MO.indexOf(x)-MO.indexOf(y));return{...p,v:p.monthly[sm],n:k.indexOf(sm)+1,N:Math.max(p.parcelas||0,k.length)};});
   const tot=mt[sm]||0;const bx=baixas[sm]||[];const tb=bx.reduce((s,b)=>s+b.amount,0);
   const title=showL&&showB?`Lançamentos e baixas – ${sm}`:showL?`Lançamentos – ${sm}`:`Baixas – ${sm}`;
@@ -262,7 +262,23 @@ function MonthSheet({sm,ps,baixas,mt,showL,showB}){
       <tr><td style={{padding:"3px 10px"}}>Total do mês</td><td style={{padding:"3px 0",...pR}}>{fB(tot)}</td></tr>
       <tr><td style={{padding:"3px 10px"}}>Baixas</td><td style={{padding:"3px 0",...pR}}>{fB(tb)}</td></tr>
       <tr><td style={{padding:"3px 10px",fontWeight:700,borderTop:"1px solid #333"}}>{tb-tot>=0?"Saldo do mês":"Falta pagar"}</td><td style={{padding:"3px 0",fontWeight:700,borderTop:"1px solid #333",...pR}}>{fB(Math.abs(tb-tot))}</td></tr>
+      {incErr&&(()=>{const net=incErr.reduce((s,x)=>s+x.x.v,0);const adj=tb-tot+net;return(<>
+        <tr><td style={{padding:"3px 10px"}}>Inconsistências (erros)</td><td style={{padding:"3px 0",...pR,color:Math.abs(net)<.005?"#111":vCor(net)}}>{net>=0?"+":"−"} {fB(Math.abs(net))}</td></tr>
+        <tr><td style={{padding:"3px 10px",fontWeight:700,borderTop:"1px solid #333"}}>{adj>=0?"Saldo considerando inconsistências":"Falta pagar considerando inconsistências"}</td><td style={{padding:"3px 0",fontWeight:700,borderTop:"1px solid #333",...pR}}>{fB(Math.abs(adj))}</td></tr>
+      </>);})()}
     </tbody></table>)}
+    {incErr&&(<div style={{marginTop:24,breakInside:"avoid"}}>
+      <div style={{fontSize:14,fontWeight:700,marginBottom:2}}>Inconsistências pendentes (erros)</div>
+      <div style={{fontSize:10,color:"#555",marginBottom:6}}>Valores das inconsistências do tipo erro ainda não tratadas, de qualquer mês.</div>
+      {incErr.length?(<table style={{width:"100%",borderCollapse:"collapse"}}>
+        <tbody>{incErr.map(({it,x})=>(<tr key={it.key}><td style={{...pTd,fontWeight:600,width:"34%"}}>{it.title}</td><td style={pTd}>{x.txt}</td><td style={{...pTd,...pR,fontWeight:700,color:vCor(x.v)}}>{x.v>0?"+":"−"} {fB(Math.abs(x.v))}<div style={{fontSize:9,fontWeight:400}}>{x.v>0?"pago a mais":"pago a menos"}</div></td></tr>))}</tbody>
+        <tfoot>{(()=>{const ma=incErr.filter(e=>e.x.v>0).reduce((s,e)=>s+e.x.v,0),me=incErr.filter(e=>e.x.v<0).reduce((s,e)=>s-e.x.v,0);return(<>
+          <tr><td style={pTf} colSpan={2}>Total pago a mais</td><td style={{...pTf,...pR,color:vCor(1)}}>+ {fB(ma)}</td></tr>
+          <tr><td style={{...pTd,fontWeight:700}} colSpan={2}>Total pago a menos</td><td style={{...pTd,...pR,fontWeight:700,color:vCor(-1)}}>− {fB(me)}</td></tr>
+          <tr><td style={{...pTd,fontWeight:700}} colSpan={2}>Saldo das inconsistências</td><td style={{...pTd,...pR,fontWeight:700,color:Math.abs(ma-me)<.005?"#111":vCor(ma-me)}}>{ma-me>=0?"+":"−"} {fB(Math.abs(ma-me))}</td></tr>
+        </>);})()}</tfoot>
+      </table>):(<div style={{fontSize:11,color:"#555"}}>Nenhuma inconsistência do tipo erro pendente.</div>)}
+    </div>)}
   </>);
 }
 // Impressão rápida do Dashboard: lançamentos, com opção de incluir as baixas
@@ -400,9 +416,11 @@ function IncSheet({items,ps,baixas}){
   </>);
 }
 // Aba Relatórios
-function Relat({ps,baixas,mt,am}){
+function Relat({ps,baixas,mt,am,incOk}){
   const months=[...am].reverse();
-  const[m,setM]=useState(am.includes(cmk())?cmk():months[0]);const[tipo,setTipo]=useState("ambos");const[open,setOpen]=useState(null);
+  const[m,setM]=useState(am.includes(cmk())?cmk():months[0]);const[tipo,setTipo]=useState("ambos");const[open,setOpen]=useState(null);const[comInc,setComInc]=useState(false);
+  // erros pendentes com valor (cada compra/mês uma vez)
+  const incErr=useMemo(()=>{const seen={};return findIncons(ps,baixas).filter(i=>i.sev==="Erro"&&!(incOk||{})[i.key]).map(it=>({it,x:impactIncon(it,ps,baixas)})).filter(e=>e.x&&!seen[e.x.ref]&&(seen[e.x.ref]=1));},[ps,baixas,incOk]);
   const card={background:Z.cd,border:`1px solid ${Z.bd}`,borderRadius:10,padding:16,marginBottom:18};
   const sel={background:Z.cd2,color:Z.tx,border:`1px solid ${Z.bd}`,borderRadius:6,padding:"6px 9px",fontSize:12,fontFamily:Z.ft};
   const btn={background:`linear-gradient(135deg,${Z.ac3},${Z.ac2})`,color:"#fff",border:"none",borderRadius:6,padding:"8px 16px",fontSize:12,fontWeight:600,cursor:"pointer",fontFamily:Z.ft};
@@ -414,9 +432,10 @@ function Relat({ps,baixas,mt,am}){
         <label style={{fontSize:11,color:Z.tx2,display:"flex",alignItems:"center",gap:6}}>Mês<select value={m} onChange={e=>setM(e.target.value)} style={sel}>{months.map(x=><option key={x} value={x}>{x}</option>)}</select></label>
         <div style={{display:"flex",gap:12,flexWrap:"wrap"}}>{tipos.map(([v,l])=>(<label key={v} style={{fontSize:12,color:Z.tx,display:"flex",alignItems:"center",gap:5,cursor:"pointer"}}><input type="radio" name="tipo" checked={tipo===v} onChange={()=>setTipo(v)} style={{accentColor:Z.ac2}}/>{l}</label>))}</div>
       </div>
+      <label style={{display:"flex",alignItems:"center",gap:8,fontSize:12,color:Z.tx,cursor:"pointer",marginBottom:14}}><input type="checkbox" checked={comInc} onChange={e=>setComInc(e.target.checked)} style={{width:16,height:16,accentColor:Z.ac2}}/>Incluir os valores das inconsistências do tipo erro</label>
       <button onClick={()=>setOpen("mes")} style={btn}>Visualizar e imprimir</button>
     </div>
-    {open==="mes"&&<PrintShell onClose={()=>setOpen(null)}><MonthSheet sm={m} {...{ps,baixas,mt}} showL={tipo!=="bx"} showB={tipo!=="lanc"}/></PrintShell>}
+    {open==="mes"&&<PrintShell onClose={()=>setOpen(null)}><MonthSheet sm={m} {...{ps,baixas,mt}} showL={tipo!=="bx"} showB={tipo!=="lanc"} incErr={comInc?incErr:null}/></PrintShell>}
   </div>);
 }
 
@@ -427,6 +446,9 @@ function Incons({ps,baixas,incOk,setIncOk,user}){
   const pend=all.filter(i=>!incOk[i.key]);const trat=all.filter(i=>incOk[i.key]);
   const list=(filtro==="pend"?pend:filtro==="trat"?trat:all).filter(i=>sev==="all"||i.sev===sev);
   const selList=all.filter(i=>sel[i.key]);
+  // ao abrir ou trocar de filtro, a lista exibida vem toda selecionada
+  const listKey=list.map(i=>i.key).join(",");
+  useEffect(()=>{setSel(Object.fromEntries(list.map(i=>[i.key,true])));},[filtro,sev,listKey]);
   const toggleOk=i=>setIncOk(o=>{const n={...o};if(n[i.key])delete n[i.key];else n[i.key]={by:user?.email||"",ts:new Date().toISOString(),label:`${i.cat}: ${i.title}`};return n;});
   const nErr=pend.filter(i=>i.sev==="Erro").length,nAt=pend.length-nErr;
   const card={background:Z.cd,border:`1px solid ${Z.bd}`,borderRadius:10,padding:16,marginBottom:18};
@@ -636,7 +658,7 @@ function App(){
       {tab==="baixas"&&<BaixasView {...{baixas,setBaixas,mt,am,isAdmin}}/>}
       {/*tab==="people"&&<Ppl ppl={ppl} setPpl={setPpl} isAdmin={isAdmin}/>*/}
       {tab==="reports"&&<Rpts {...{ps,mt,am}}/>}
-      {tab==="relatorios"&&<Relat {...{ps,baixas,mt,am}}/>}
+      {tab==="relatorios"&&<Relat {...{ps,baixas,mt,am,incOk}}/>}
       {tab==="incons"&&isAdmin&&<Incons {...{ps,baixas,incOk,setIncOk,user}}/>}
       {tab==="history"&&<Hist history={history}/>}
     </main>
