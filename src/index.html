@@ -232,19 +232,28 @@ function PrintShell({controls,onClose,children}){
     <div className="print-sheet" style={{WebkitPrintColorAdjust:"exact",printColorAdjust:"exact",maxWidth:760,margin:"0 auto",background:"#fff",color:"#111",borderRadius:6,padding:"clamp(14px,4vw,30px)",fontFamily:"Arial,Helvetica,sans-serif"}}>{children}</div>
   </div>,document.body);
 }
-function SheetHead({title}){
-  return(<div style={{display:"flex",justifyContent:"space-between",alignItems:"flex-end",borderBottom:"2px solid #111",paddingBottom:8,marginBottom:14,gap:10,flexWrap:"wrap"}}>
-    <div><div style={{fontSize:11,color:"#555"}}>CPC – Controle de Pagamentos com Cartão{IS_HML?" (homologação)":""}</div><div style={{fontSize:20,fontWeight:700}}>{title}</div></div>
-    <div style={{fontSize:10,color:"#555"}}>Impresso em {nowBR()}</div>
-  </div>);
+// Documento impresso: o cabeçalho (título e competência) se repete em todas as páginas
+function ReportDoc({title,comp,children}){
+  return(<table style={{width:"100%",borderCollapse:"collapse"}}>
+    <thead><tr><td style={{padding:0}}>
+      <div style={{display:"flex",justifyContent:"space-between",alignItems:"flex-end",borderBottom:"2px solid #111",paddingBottom:8,marginBottom:14,gap:10,flexWrap:"wrap"}}>
+        <div>
+          <div style={{fontSize:11,color:"#555"}}>CPC – Controle de Pagamentos com Cartão{IS_HML?" (homologação)":""}</div>
+          <div style={{fontSize:20,fontWeight:700,lineHeight:1.2}}>{title}</div>
+          <div style={{fontSize:12,marginTop:2}}>Competência: <b>{comp}</b></div>
+        </div>
+        <div style={{fontSize:10,color:"#555"}}>Impresso em {nowBR()}</div>
+      </div>
+    </td></tr></thead>
+    <tbody><tr><td style={{padding:0}}>{children}</td></tr></tbody>
+  </table>);
 }
 // Folha do mês: lançamentos e/ou baixas
 function MonthSheet({sm,ps,baixas,mt,showL,showB,incErr}){
   const rows=ps.filter(p=>p.monthly[sm]>0).sort((a,b)=>dKey(b)-dKey(a)).map(p=>{const k=Object.keys(p.monthly).sort((x,y)=>MO.indexOf(x)-MO.indexOf(y));return{...p,v:p.monthly[sm],n:k.indexOf(sm)+1,N:Math.max(p.parcelas||0,k.length)};});
   const tot=mt[sm]||0;const bx=baixas[sm]||[];const tb=bx.reduce((s,b)=>s+b.amount,0);
-  const title=showL&&showB?`Lançamentos e baixas – ${sm}`:showL?`Lançamentos – ${sm}`:`Baixas – ${sm}`;
-  return(<>
-    <SheetHead title={title}/>
+  const title=showL&&showB?"Relatório de Lançamentos e Baixas":showL?"Relatório de Lançamentos":"Relatório de Baixas";
+  return(<ReportDoc title={title} comp={sm}>
     {showL&&(rows.length?(<table style={{width:"100%",borderCollapse:"collapse"}}>
       <thead><tr><th style={pTh}>Data da compra</th><th style={pTh}>Loja</th><th style={{...pTh,textAlign:"center"}}>Parcela</th><th style={{...pTh,...pR}}>Valor</th></tr></thead>
       <tbody>{rows.map(p=>(<tr key={p.id}><td style={pTd}>{fD(p.data)}</td><td style={pTd}>{p.loja}</td><td style={{...pTd,textAlign:"center"}}>{p.n}/{p.N}</td><td style={{...pTd,...pR}}>{fB(p.v)}</td></tr>))}</tbody>
@@ -279,7 +288,7 @@ function MonthSheet({sm,ps,baixas,mt,showL,showB,incErr}){
         </>);})()}</tfoot>
       </table>):(<div style={{fontSize:11,color:"#555"}}>Nenhuma inconsistência do tipo erro pendente.</div>)}
     </div>)}
-  </>);
+  </ReportDoc>);
 }
 // Impressão rápida do Dashboard: lançamentos, com opção de incluir as baixas
 function PrintMonth({sm,ps,baixas,mt,onClose}){
@@ -385,6 +394,9 @@ function impactIncon(it,ps,baixas){
     return Math.abs(d)>=.01?{v:d,ref:`m${m}`,txt:`Saldo de ${m}: pago ${fB(pg)} para provisão de ${fB(pv)}`}:null;}
   return null;
 }
+// Competência do relatório de inconsistências: do mês mais antigo ao mais recente envolvido
+function compInc(items,ps){const ms=[];items.forEach(i=>{const kp=i.key.slice(i.cat.length+1);const m=/^(.+?\/\d{4})\|/.exec(kp);if(m)ms.push(m[1]);const P=kp.startsWith("p")&&ps.find(p=>String(p.id)===kp.slice(1));if(P)ms.push(...Object.keys(P.monthly));});
+  return ms.length?(()=>{const s=[...new Set(ms)].sort((a,b)=>mIdx(a)-mIdx(b));return s.length>1?`${s[0]} a ${s[s.length-1]}`:s[0];})():"Todos os meses";}
 const vCor=v=>v>0?"#0a7d3c":"#c62828";
 function IncSheet({items,ps,baixas}){
   const cats=[...new Set(items.map(i=>i.cat))];
@@ -392,8 +404,7 @@ function IncSheet({items,ps,baixas}){
   const imp={};items.forEach(i=>{const x=impactIncon(i,ps,baixas);if(x&&!imp[x.ref])imp[x.ref]=x;});
   const vals=Object.values(imp);const mais=vals.filter(x=>x.v>0).reduce((s,x)=>s+x.v,0),menos=vals.filter(x=>x.v<0).reduce((s,x)=>s-x.v,0);
   const semOQF=t=>t.replace(/\s*O que fazer:.*$/,"");
-  return(<>
-    <SheetHead title="Relatório de inconsistências"/>
+  return(<ReportDoc title="Relatório de Inconsistências" comp={compInc(items,ps)}>
     {!items.length&&<div style={{fontSize:12}}>Nenhuma inconsistência encontrada.</div>}
     {items.length>0&&<div style={{fontSize:11,color:"#333",marginBottom:12}}>{items.filter(i=>i.sev==="Erro").length} erro(s) e {items.filter(i=>i.sev==="Atenção").length} ponto(s) de atenção.</div>}
     {cats.map(c=>{const l=items.filter(i=>i.cat===c);return(<div key={c} style={{marginBottom:16}}>
@@ -413,7 +424,7 @@ function IncSheet({items,ps,baixas}){
         <tr><td style={{padding:"5px 10px",fontWeight:700,borderTop:"1px solid #333"}}>Saldo ({mais-menos>=0?"a mais":"a menos"})</td><td style={{padding:"5px 0",...pR,fontWeight:700,borderTop:"1px solid #333",color:Math.abs(mais-menos)<.005?"#111":vCor(mais-menos)}}>{mais-menos>=0?"+":"−"} {fB(Math.abs(mais-menos))}</td></tr>
       </tbody></table>
     </div>)}
-  </>);
+  </ReportDoc>);
 }
 // Aba Relatórios
 function Relat({ps,baixas,mt,am,incOk}){
