@@ -3,9 +3,10 @@
 O CPC é um site estático; quem envia o e-mail é um pequeno script na sua conta Google
 (gratuito, até 100 e-mails por dia, enviados do seu próprio Gmail).
 
-**Como funciona:** cada alteração entra numa fila. A primeira operação abre uma janela de
-**8 horas**; ao fim dela, todas as operações do período saem num **único e-mail**, e a fila
-recomeça vazia. Para enviar antes, rode `enviarAgora` no editor. Para mudar o intervalo,
+**Como funciona:** cada alteração entra numa fila **por usuário**. A primeira operação de um
+usuário abre a janela de **8 horas** dele; ao fim dela, todas as operações que ele fez no
+período saem num **único e-mail** com o nome dele, e a fila dele recomeça vazia. Cada
+usuário tem a sua janela independente. Para enviar antes, rode `enviarAgora` no editor. Para mudar o intervalo,
 altere `JANELA_HORAS`.
 
 1. Acesse https://script.google.com e clique em **Novo projeto**.
@@ -18,4 +19,5 @@ altere `JANELA_HORAS`.
 5. Copie a **URL do app da Web** (termina em `/exec`) e envie para configurar no CPC
    (constante `EMAIL_HOOK` em `src/index.html`).
 
-Para incluir outros destinatários, edite `DESTINATARIOS` no script e reimplante.
+Para que outros usuários também recebam os resumos, acrescente os e-mails em
+`DESTINATARIOS` no script e reimplante (Implantar → Gerenciar implantações → editar → Nova versão).

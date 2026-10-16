@@ -156,8 +156,9 @@ Definidos em `ROLES` (`src/index.html`) e nas regras `firestore.rules`.
 
 A cada gravação com inclusão, alteração ou exclusão, o app envia as operações para um
 Google Apps Script (`email/Code.gs`). O script guarda-as numa fila (Propriedades do script);
-a primeira operação abre uma janela de 8 horas e, ao fim dela, um gatilho de tempo envia
-todas as operações do período num único e-mail ao administrador. Nada disso é gravado no
+a janela é **por usuário**: a primeira operação de cada usuário abre uma janela de 8 horas
+dele e, ao fim, um gatilho de tempo envia todas as operações desse usuário no período num
+único e-mail (com o nome de quem alterou) aos destinatários de `DESTINATARIOS`. Nada disso é gravado no
 Firestore. Formato enviado pelo app:
 
 ```json
