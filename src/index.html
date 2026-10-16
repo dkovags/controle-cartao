@@ -211,6 +211,46 @@ function exportXLSX(ps,baixas,ppl,mt){
   XLSX.writeFile(wb,`CPC_Export_${ts}.xlsx`);
 }
 
+// Impressão dos lançamentos do mês (opcionalmente com as baixas)
+function PrintMonth({sm,ps,baixas,mt,onClose}){
+  const[withBx,setWithBx]=useState(false);
+  const rows=ps.filter(p=>p.monthly[sm]>0).sort((a,b)=>dKey(b)-dKey(a)).map(p=>{const k=Object.keys(p.monthly).sort((x,y)=>MO.indexOf(x)-MO.indexOf(y));return{...p,v:p.monthly[sm],n:k.indexOf(sm)+1,N:Math.max(p.parcelas||0,k.length)};});
+  const tot=mt[sm]||0;const bx=baixas[sm]||[];const tb=bx.reduce((s,b)=>s+b.amount,0);
+  const now=new Date().toLocaleString("pt-BR",{day:"2-digit",month:"2-digit",year:"numeric",hour:"2-digit",minute:"2-digit"});
+  const th={textAlign:"left",padding:"6px 8px",borderBottom:"2px solid #333",fontSize:11};const td={padding:"5px 8px",borderBottom:"1px solid #ddd",fontSize:11};const R={textAlign:"right",whiteSpace:"nowrap"};const tf={...td,fontWeight:700,borderTop:"2px solid #333",borderBottom:"none"};
+  const btn={border:"none",borderRadius:6,padding:"8px 16px",fontSize:12,fontWeight:600,cursor:"pointer",fontFamily:Z.ft};
+  return ReactDOM.createPortal(<div className="print-modal" style={{position:"fixed",inset:0,background:"rgba(0,0,0,.7)",zIndex:300,overflowY:"auto",padding:16,fontFamily:Z.ft}}>
+    <div className="no-print" style={{maxWidth:760,margin:"0 auto 10px",display:"flex",justifyContent:"space-between",alignItems:"center",gap:10,flexWrap:"wrap",background:Z.cd,border:`1px solid ${Z.bd2}`,borderRadius:10,padding:"10px 14px"}}>
+      <label style={{display:"flex",alignItems:"center",gap:8,fontSize:12,color:Z.tx,cursor:"pointer"}}><input type="checkbox" checked={withBx} onChange={e=>setWithBx(e.target.checked)} style={{width:16,height:16,accentColor:Z.ac2}}/>Incluir as baixas do mês</label>
+      <div style={{display:"flex",gap:6}}><button onClick={()=>window.print()} style={{...btn,background:`linear-gradient(135deg,${Z.ac3},${Z.ac2})`,color:"#fff"}}>Imprimir</button><button onClick={onClose} style={{...btn,background:Z.cd2,color:Z.tx2,border:`1px solid ${Z.bd}`}}>Fechar</button></div>
+    </div>
+    <div className="print-sheet" style={{maxWidth:760,margin:"0 auto",background:"#fff",color:"#111",borderRadius:6,padding:"clamp(14px,4vw,30px)",fontFamily:"Arial,Helvetica,sans-serif"}}>
+      <div style={{display:"flex",justifyContent:"space-between",alignItems:"flex-end",borderBottom:"2px solid #111",paddingBottom:8,marginBottom:14,gap:10,flexWrap:"wrap"}}>
+        <div><div style={{fontSize:11,color:"#555"}}>CPC – Controle de Pagamentos com Cartão{IS_HML?" (homologação)":""}</div><div style={{fontSize:20,fontWeight:700}}>Lançamentos – {sm}</div></div>
+        <div style={{fontSize:10,color:"#555"}}>Impresso em {now}</div>
+      </div>
+      <table style={{width:"100%",borderCollapse:"collapse"}}>
+        <thead><tr><th style={th}>Data da compra</th><th style={th}>Loja</th><th style={{...th,textAlign:"center"}}>Parcela</th><th style={{...th,...R}}>Valor</th></tr></thead>
+        <tbody>{rows.map(p=>(<tr key={p.id}><td style={td}>{fD(p.data)}</td><td style={td}>{p.loja}</td><td style={{...td,textAlign:"center"}}>{p.n}/{p.N}</td><td style={{...td,...R}}>{fB(p.v)}</td></tr>))}</tbody>
+        <tfoot><tr><td style={tf} colSpan={3}>Total do mês ({rows.length} lançamento{rows.length!==1?"s":""})</td><td style={{...tf,...R}}>{fB(tot)}</td></tr></tfoot>
+      </table>
+      {withBx&&(<div style={{marginTop:24}}>
+        <div style={{fontSize:14,fontWeight:700,marginBottom:6}}>Baixas – {sm}</div>
+        {bx.length?(<table style={{width:"100%",borderCollapse:"collapse"}}>
+          <thead><tr><th style={th}>#</th><th style={th}>Data do pagamento</th><th style={{...th,...R}}>Valor</th></tr></thead>
+          <tbody>{bx.map((b,i)=>(<tr key={i}><td style={td}>{i+1}</td><td style={td}>{fD(b.date)}</td><td style={{...td,...R}}>{fB(b.amount)}</td></tr>))}</tbody>
+          <tfoot><tr><td style={tf} colSpan={2}>Total de baixas</td><td style={{...tf,...R}}>{fB(tb)}</td></tr></tfoot>
+        </table>):(<div style={{fontSize:11,color:"#555"}}>Nenhuma baixa registrada neste mês.</div>)}
+        <table style={{marginTop:14,marginLeft:"auto",borderCollapse:"collapse",fontSize:12}}><tbody>
+          <tr><td style={{padding:"3px 10px"}}>Total do mês</td><td style={{padding:"3px 0",...R}}>{fB(tot)}</td></tr>
+          <tr><td style={{padding:"3px 10px"}}>Baixas</td><td style={{padding:"3px 0",...R}}>{fB(tb)}</td></tr>
+          <tr><td style={{padding:"3px 10px",fontWeight:700,borderTop:"1px solid #333"}}>{tb-tot>=0?"Saldo do mês":"Falta pagar"}</td><td style={{padding:"3px 0",fontWeight:700,borderTop:"1px solid #333",...R}}>{fB(Math.abs(tb-tot))}</td></tr>
+        </tbody></table>
+      </div>)}
+    </div>
+  </div>,document.body);
+}
+
 function Hist({history}){
   const[n,setN]=useState(50);const list=[...history].reverse();
   const fmt=t=>new Date(t).toLocaleString("pt-BR",{day:"2-digit",month:"2-digit",year:"numeric",hour:"2-digit",minute:"2-digit"});
@@ -341,7 +381,16 @@ function App(){
   .bx-summary{flex-direction:column!important;align-items:flex-start!important;gap:4px!important}
   .modal-inner{width:95%!important;padding:16px!important;max-height:90vh;overflow-y:auto}
   table{font-size:9px!important}
-  .chart-wrap{overflow-x:auto;-webkit-overflow-scrolling:touch}
+  .chart-wrap{overflow-x:auto;-webkit-overflow-scrolling:touch;justify-content:flex-start!important}
+}
+@media print{
+  #root{display:none!important}
+  .no-print{display:none!important}
+  .print-modal{position:static!important;background:#fff!important;padding:0!important;overflow:visible!important}
+  .print-sheet{max-width:none!important;border-radius:0!important;padding:0!important}
+  body{background:#fff!important}
+  tr{break-inside:avoid}
+  @page{margin:14mm}
 }`}</style>
 
     <header style={{background:Z.cd,borderBottom:`1px solid ${Z.bd}`,padding:"13px 18px",display:"flex",alignItems:"center",justifyContent:"space-between",position:"sticky",top:0,zIndex:50,flexWrap:"wrap",gap:8}}>
@@ -390,7 +439,7 @@ function St({label,value,sub,color=Z.ac}){return(<div style={{background:Z.cd,bo
 
 function Dash({mt,sm,setSm,cmp,td,ap,am,ps,baixas,setBaixas,isAdmin}){
   const[selLoja,setSelLoja]=useState(null);
-  const[showAddBx,setShowAddBx]=useState(false);
+  const[showAddBx,setShowAddBx]=useState(false);const[showPrint,setShowPrint]=useState(false);
   const[bxAmt,setBxAmt]=useState("");
   const[bxDate,setBxDate]=useState("");
   const[bxErr,setBxErr]=useState({});
@@ -435,7 +484,8 @@ function Dash({mt,sm,setSm,cmp,td,ap,am,ps,baixas,setBaixas,isAdmin}){
   const bxES={fontSize:8,color:Z.rd,marginTop:1};
 
   return(<div>
-    <div style={{display:"flex",alignItems:"center",gap:8,marginBottom:18}}><select value={sm} onChange={e=>{setSm(e.target.value);setSelLoja(null);setShowAddBx(false);}} style={{background:Z.cd,color:Z.tx,border:`1px solid ${Z.bd}`,borderRadius:6,padding:"6px 9px",fontSize:12,fontWeight:500,cursor:"pointer",fontFamily:Z.ft}}>{[...am].reverse().map(m=><option key={m} value={m}>{m}</option>)}</select></div>
+    <div style={{display:"flex",alignItems:"center",gap:8,marginBottom:18}}><select value={sm} onChange={e=>{setSm(e.target.value);setSelLoja(null);setShowAddBx(false);}} style={{background:Z.cd,color:Z.tx,border:`1px solid ${Z.bd}`,borderRadius:6,padding:"6px 9px",fontSize:12,fontWeight:500,cursor:"pointer",fontFamily:Z.ft}}>{[...am].reverse().map(m=><option key={m} value={m}>{m}</option>)}</select><button onClick={()=>setShowPrint(true)} style={{background:Z.cd,color:Z.tx2,border:`1px solid ${Z.bd}`,borderRadius:6,padding:"6px 12px",fontSize:11,cursor:"pointer",fontFamily:Z.ft}}>🖨 Imprimir</button></div>
+    {showPrint&&<PrintMonth {...{sm,ps,baixas,mt}} onClose={()=>setShowPrint(false)}/>}
     <div className="stat-row" style={{display:"flex",gap:10,flexWrap:"wrap",marginBottom:18}}>
       <St label="Fatura do Mês" value={fB(c)} sub={df!==0?`${df>0?"▲":"▼"} ${Math.abs(df).toFixed(1)}%`:null} color={Z.ac}/>
       <St label="Baixas do Mês" value={fB(totalBaixas)} sub={`${mBaixas.length} pagamento${mBaixas.length!==1?"s":""}`} color={Z.gn}/>
@@ -482,7 +532,7 @@ function Dash({mt,sm,setSm,cmp,td,ap,am,ps,baixas,setBaixas,isAdmin}){
 
     <div style={{background:Z.cd,border:`1px solid ${Z.bd}`,borderRadius:10,padding:18,marginBottom:18}}>
       <div style={{fontSize:11,fontWeight:600,color:Z.ac,marginBottom:14}}>Evolução da Fatura</div>
-      <div className="chart-wrap" style={{display:"flex",alignItems:"flex-end",gap:1,height:140,justifyContent:"center"}}>
+      <div className="chart-wrap" style={{display:"flex",alignItems:"flex-end",gap:1,height:160,justifyContent:"center"}}>
         {cms.map(m=>{const v=mt[m]||0;const h=Math.max(3,(v/mx)*120);const s=m===sm;const p=pmk(m);return(<div key={m} onClick={()=>{setSm(m);setSelLoja(null);setShowAddBx(false);}} style={{flex:"1 1 0",maxWidth:60,display:"flex",flexDirection:"column",alignItems:"center",cursor:"pointer"}}><span style={{fontSize:8,color:s?Z.ac:Z.tx3,marginBottom:2,fontFamily:Z.mn}}>{v>999?`${(v/1e3).toFixed(0)}k`:v.toFixed(0)}</span><div style={{width:"80%",height:h,background:s?`linear-gradient(180deg,${Z.ac2},${Z.ac3})`:`linear-gradient(180deg,${Z.bd2},${Z.bd})`,borderRadius:"4px 4px 1px 1px",border:s?`1px solid ${Z.ac}`:`1px solid ${Z.bd}`,boxShadow:s?`0 0 10px ${Z.ac3}40`:"none",transition:"all .25s"}}/><span style={{fontSize:8,color:s?Z.tx:Z.tx3,marginTop:2}}>{p?`${MS[p.month]}/${String(p.year).slice(2)}`:""}</span></div>);})}
       </div>
     </div>
