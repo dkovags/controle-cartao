@@ -357,16 +357,46 @@ function explainIncon(it,ps,baixas){
   if(it.cat==="Nomes de loja parecidos"){const ns=kp.split("/");return`Nomes encontrados: ${ns.map(x=>`${x} (${ps.filter(p=>p.loja===x).length} compra${ps.filter(p=>p.loja===x).length!==1?"s":""})`).join(", ")}. Se forem a mesma loja, unifique o nome para os relatórios e o ranking somarem corretamente; se não, marque como tratada.`;}
   return"";
 }
+// Impacto em valor: v>0 pago a mais, v<0 pago a menos (null quando não se aplica)
+function impactIncon(it,ps,baixas){
+  const kp=it.key.slice(it.cat.length+1);const r2=v=>Math.round(v*100)/100;
+  if(kp.startsWith("p")&&(it.cat==="Parcelas × meses lançados"||it.cat==="Soma das parcelas × total")){
+    const P=ps.find(p=>String(p.id)===kp.slice(1));if(!P)return null;const soma=r2(Object.values(P.monthly).reduce((s,v)=>s+v,0));const d=r2(soma-P.total);
+    return d?{v:d,ref:`p${P.id}`,txt:d>0?`Lançado ${fB(d)} além do total da compra`:`Faltou lançar ${fB(-d)} do total da compra`}:null;
+  }
+  const bm=/^(.+?\/\d{4})\|/.exec(kp);
+  if(bm&&it.cat==="Possível baixa duplicada"){const m=bm[1];const pv=r2(ps.reduce((s,p)=>s+(p.monthly[m]||0),0));const pg=r2((baixas[m]||[]).reduce((s,b)=>s+b.amount,0));const d=r2(pg-pv);
+    return Math.abs(d)>=.01?{v:d,ref:`m${m}`,txt:`Saldo de ${m}: pago ${fB(pg)} para provisão de ${fB(pv)}`}:null;}
+  return null;
+}
+const vCor=v=>v>0?"#0a7d3c":"#c62828";
 function IncSheet({items,ps,baixas}){
   const cats=[...new Set(items.map(i=>i.cat))];
+  // consolidação: cada compra/mês conta uma vez
+  const imp={};items.forEach(i=>{const x=impactIncon(i,ps,baixas);if(x&&!imp[x.ref])imp[x.ref]=x;});
+  const vals=Object.values(imp);const mais=vals.filter(x=>x.v>0).reduce((s,x)=>s+x.v,0),menos=vals.filter(x=>x.v<0).reduce((s,x)=>s-x.v,0);
+  const semOQF=t=>t.replace(/\s*O que fazer:.*$/,"");
   return(<>
     <SheetHead title="Relatório de inconsistências"/>
     {!items.length&&<div style={{fontSize:12}}>Nenhuma inconsistência encontrada.</div>}
     {items.length>0&&<div style={{fontSize:11,color:"#333",marginBottom:12}}>{items.filter(i=>i.sev==="Erro").length} erro(s) e {items.filter(i=>i.sev==="Atenção").length} ponto(s) de atenção.</div>}
-    {cats.map(c=>{const l=items.filter(i=>i.cat===c);return(<div key={c} style={{marginBottom:16,breakInside:"avoid"}}>
+    {cats.map(c=>{const l=items.filter(i=>i.cat===c);return(<div key={c} style={{marginBottom:16}}>
       <div style={{fontSize:13,fontWeight:700,marginBottom:4}}>{c} <span style={{fontWeight:400,color:"#555"}}>({l.length}) – {l[0].sev}</span></div>
-      <table style={{width:"100%",borderCollapse:"collapse"}}><tbody>{l.map((i,k)=>{const ex=ps?explainIncon(i,ps,baixas):"";return(<tr key={k} style={{breakInside:"avoid"}}><td style={{...pTd,width:"34%",fontWeight:600}}>{i.title}</td><td style={pTd}>{i.detail}{ex&&<div style={{marginTop:5,padding:"6px 8px",background:"#f4f1fb",borderLeft:"3px solid #7c3aed",fontSize:10.5,lineHeight:1.45,color:"#222"}}><b>Análise automática:</b> {ex}</div>}</td></tr>);})}</tbody></table>
+      <table style={{width:"100%",borderCollapse:"collapse"}}><tbody>{l.map((i,k)=>{const ex=semOQF(explainIncon(i,ps,baixas));const x=impactIncon(i,ps,baixas);return(<tr key={k} style={{breakInside:"avoid"}}>
+        <td style={{...pTd,width:"30%",fontWeight:600}}>{i.title}</td>
+        <td style={pTd}>{i.detail}{ex&&<div style={{marginTop:5,padding:"6px 8px",background:"#f4f1fb",borderLeft:"3px solid #7c3aed",fontSize:10.5,lineHeight:1.45,color:"#222"}}><b>Análise automática:</b> {ex}</div>}</td>
+        <td style={{...pTd,...pR,width:"17%"}}>{x?(<><div style={{fontWeight:700,color:vCor(x.v)}}>{x.v>0?"+":"−"} {fB(Math.abs(x.v))}</div><div style={{fontSize:9,color:vCor(x.v)}}>{x.v>0?"pago a mais":"pago a menos"}</div></>):<span style={{color:"#999"}}>—</span>}</td>
+      </tr>);})}</tbody></table>
     </div>);})}
+    {items.length>0&&(<div style={{marginTop:8,breakInside:"avoid"}}>
+      <div style={{fontSize:13,fontWeight:700,marginBottom:4,borderTop:"2px solid #111",paddingTop:10}}>Consolidação dos valores</div>
+      <div style={{fontSize:10,color:"#555",marginBottom:6}}>Cada compra e cada mês entram uma única vez, mesmo que apareçam em mais de uma inconsistência.</div>
+      <table style={{marginLeft:"auto",borderCollapse:"collapse",fontSize:12,minWidth:300}}><tbody>
+        <tr><td style={{padding:"4px 10px"}}>Total pago a mais</td><td style={{padding:"4px 0",...pR,fontWeight:700,color:vCor(1)}}>+ {fB(mais)}</td></tr>
+        <tr><td style={{padding:"4px 10px"}}>Total pago a menos</td><td style={{padding:"4px 0",...pR,fontWeight:700,color:vCor(-1)}}>− {fB(menos)}</td></tr>
+        <tr><td style={{padding:"5px 10px",fontWeight:700,borderTop:"1px solid #333"}}>Saldo ({mais-menos>=0?"a mais":"a menos"})</td><td style={{padding:"5px 0",...pR,fontWeight:700,borderTop:"1px solid #333",color:Math.abs(mais-menos)<.005?"#111":vCor(mais-menos)}}>{mais-menos>=0?"+":"−"} {fB(Math.abs(mais-menos))}</td></tr>
+      </tbody></table>
+    </div>)}
   </>);
 }
 // Aba Relatórios
@@ -393,9 +423,9 @@ function Relat({ps,baixas,mt,am}){
 // Aba Inconsistências (só admin): seleção para impressão e marcação de tratadas
 function Incons({ps,baixas,incOk,setIncOk,user}){
   const all=useMemo(()=>findIncons(ps,baixas),[ps,baixas]);
-  const[filtro,setFiltro]=useState("pend");const[sel,setSel]=useState({});const[exp,setExp]=useState({});const[open,setOpen]=useState(false);
+  const[filtro,setFiltro]=useState("pend");const[sev,setSev]=useState("all");const[sel,setSel]=useState({});const[exp,setExp]=useState({});const[open,setOpen]=useState(false);
   const pend=all.filter(i=>!incOk[i.key]);const trat=all.filter(i=>incOk[i.key]);
-  const list=filtro==="pend"?pend:filtro==="trat"?trat:all;
+  const list=(filtro==="pend"?pend:filtro==="trat"?trat:all).filter(i=>sev==="all"||i.sev===sev);
   const selList=all.filter(i=>sel[i.key]);
   const toggleOk=i=>setIncOk(o=>{const n={...o};if(n[i.key])delete n[i.key];else n[i.key]={by:user?.email||"",ts:new Date().toISOString(),label:`${i.cat}: ${i.title}`};return n;});
   const nErr=pend.filter(i=>i.sev==="Erro").length,nAt=pend.length-nErr;
@@ -411,6 +441,7 @@ function Incons({ps,baixas,incOk,setIncOk,user}){
     <div style={{fontSize:10,color:Z.tx3,marginBottom:12}}>Marque "Tratada" quando o caso estiver resolvido ou confirmado como correto: ele sai das contagens e do relatório, mas continua disponível no filtro "Tratadas". Use a caixa da esquerda para escolher o que imprimir.</div>
     <div style={{display:"flex",gap:6,flexWrap:"wrap",alignItems:"center",marginBottom:10}}>
       {[["pend",`Pendentes (${pend.length})`],["trat",`Tratadas (${trat.length})`],["all",`Todas (${all.length})`]].map(([v,l])=>(<button key={v} onClick={()=>setFiltro(v)} style={{...btn2,background:filtro===v?`${Z.ac3}30`:Z.cd2,color:filtro===v?Z.ac:Z.tx2}}>{l}</button>))}
+      <select value={sev} onChange={e=>setSev(e.target.value)} style={{...btn2,color:sev==="Erro"?Z.rd:sev==="Atenção"?Z.yl:Z.tx2}}><option value="all">Erros e atenção</option><option value="Erro">Só erros</option><option value="Atenção">Só atenção</option></select>
       <span style={{flex:1}}/>
       <button onClick={()=>setSel(s=>{const n={...s};const allSel=list.every(i=>n[i.key]);list.forEach(i=>{if(allSel)delete n[i.key];else n[i.key]=true;});return n;})} style={btn2}>{list.length&&list.every(i=>sel[i.key])?"Desmarcar":"Selecionar"} todas da lista</button>
       <button disabled={!selList.length} onClick={()=>setOpen(true)} style={{...btn,opacity:selList.length?1:.4,cursor:selList.length?"pointer":"not-allowed"}}>Imprimir selecionadas ({selList.length})</button>
