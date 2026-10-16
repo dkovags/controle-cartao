@@ -64,7 +64,8 @@ const SEED_BX={"Junho/2023":[{"amount":2000,"date":"25/05/2023"},{"amount":3000,
 const SEED_ACUM={"Agosto/2023":0,"Setembro/2023":0,"Outubro/2023":0,"Novembro/2023":0,"Dezembro/2023":0,"Janeiro/2024":0,"Fevereiro/2024":0,"Março/2024":1073.54,"Abril/2024":-0.04,"Maio/2024":-0.04,"Junho/2024":1335.16,"Julho/2024":1506.61,"Agosto/2024":490.01,"Setembro/2024":1335.16,"Outubro/2024":0,"Novembro/2024":0,"Dezembro/2024":0,"Janeiro/2025":0,"Fevereiro/2025":33.18,"Março/2025":0.01,"Abril/2025":0,"Maio/2025":0.01,"Junho/2025":0.01,"Julho/2025":0.02,"Agosto/2025":255.74,"Setembro/2025":311.47,"Outubro/2025":83.67,"Novembro/2025":5.05,"Dezembro/2025":0.01,"Janeiro/2026":0.60,"Fevereiro/2026":0.57};
 // ─── FIREBASE CONFIG ─────────────────────────────
 const FB_CFG={apiKey:"AIzaSyDjoF7vPKRgXtNhhDyky5GQvfp76vgB99c",authDomain:"cartao-491a2.firebaseapp.com",projectId:"cartao-491a2",storageBucket:"cartao-491a2.firebasestorage.app",messagingSenderId:"967186616580",appId:"1:967186616580:web:27e525936cb5d0d92c4051"};
-const ROLES={"kovags@gmail.com":"admin","kelianeserra@gmail.com":"viewer"};
+// Perfis: admin (tudo), editor (inclui/altera/exclui; sem backup, exportar e inconsistências), viewer (só consulta)
+const ROLES={"kovags@gmail.com":"admin","kelianeserra@gmail.com":"editor"};
 let db=null;let fbApp=null;
 function initFB(){
   if(db)return db;
@@ -431,7 +432,7 @@ function IncSheet({items,ps,baixas}){
   </ReportDoc>);
 }
 // Aba Relatórios
-function Relat({ps,baixas,mt,am,incOk}){
+function Relat({ps,baixas,mt,am,incOk,isAdmin}){
   const months=[...am].reverse();
   const[m,setM]=useState(am.includes(cmk())?cmk():months[0]);const[tipo,setTipo]=useState("ambos");const[open,setOpen]=useState(null);const[comInc,setComInc]=useState(false);
   // erros pendentes com valor (cada compra/mês uma vez)
@@ -447,10 +448,10 @@ function Relat({ps,baixas,mt,am,incOk}){
         <label style={{fontSize:11,color:Z.tx2,display:"flex",alignItems:"center",gap:6}}>Mês<select value={m} onChange={e=>setM(e.target.value)} style={sel}>{months.map(x=><option key={x} value={x}>{x}</option>)}</select></label>
         <div style={{display:"flex",gap:12,flexWrap:"wrap"}}>{tipos.map(([v,l])=>(<label key={v} style={{fontSize:12,color:Z.tx,display:"flex",alignItems:"center",gap:5,cursor:"pointer"}}><input type="radio" name="tipo" checked={tipo===v} onChange={()=>setTipo(v)} style={{accentColor:Z.ac2}}/>{l}</label>))}</div>
       </div>
-      <label style={{display:"flex",alignItems:"center",gap:8,fontSize:12,color:Z.tx,cursor:"pointer",marginBottom:14}}><input type="checkbox" checked={comInc} onChange={e=>setComInc(e.target.checked)} style={{width:16,height:16,accentColor:Z.ac2}}/>Incluir os valores das inconsistências do tipo erro</label>
+      {isAdmin&&<label style={{display:"flex",alignItems:"center",gap:8,fontSize:12,color:Z.tx,cursor:"pointer",marginBottom:14}}><input type="checkbox" checked={comInc} onChange={e=>setComInc(e.target.checked)} style={{width:16,height:16,accentColor:Z.ac2}}/>Incluir os valores das inconsistências do tipo erro</label>}
       <button onClick={()=>setOpen("mes")} style={btn}>Visualizar e imprimir</button>
     </div>
-    {open==="mes"&&<PrintShell docName={pdfName(monthTitle(tipo!=="bx",tipo!=="lanc"),m)} onClose={()=>setOpen(null)}><MonthSheet sm={m} {...{ps,baixas,mt}} showL={tipo!=="bx"} showB={tipo!=="lanc"} incErr={comInc?incErr:null}/></PrintShell>}
+    {open==="mes"&&<PrintShell docName={pdfName(monthTitle(tipo!=="bx",tipo!=="lanc"),m)} onClose={()=>setOpen(null)}><MonthSheet sm={m} {...{ps,baixas,mt}} showL={tipo!=="bx"} showB={tipo!=="lanc"} incErr={isAdmin&&comInc?incErr:null}/></PrintShell>}
   </div>);
 }
 
@@ -516,7 +517,8 @@ function App(){
   const[user,setUser]=useState(null);const[role,setRole]=useState(null);const[authLoading,setAuthLoading]=useState(true);const[authError,setAuthError]=useState(null);
   const[ps,setPs]=useState([]);const[ppl,setPpl]=useState({});const[baixas,setBaixas]=useState({});const[ok,setOk]=useState(false);const[saving,setSaving]=useState(false);const[lastUpdate,setLastUpdate]=useState(null);const[loadErr,setLoadErr]=useState(null);const[history,setHistory]=useState([]);const[incOk,setIncOk]=useState({});
   const[tab,setTab]=useState("dashboard");const[sm,setSm]=useState(cmk());const[sf,setSf]=useState(false);const[ep,setEp]=useState(null);const[sr,setSr]=useState("");const[toast,setToast]=useState(null);
-  const isAdmin=role==="admin";
+  const lojasList=useMemo(()=>[...new Set(ps.map(p=>p.loja))],[ps]);
+  const isAdmin=role==="admin";const canEdit=isAdmin||role==="editor";
 
   // Listen to auth state
   useEffect(()=>{
@@ -563,7 +565,7 @@ function App(){
   const okRef=useRef(false);okRef.current=ok;const ps0=useRef(ps);ps0.current=ps;const ppl0=useRef(ppl);ppl0.current=ppl;const bx0=useRef(baixas);bx0.current=baixas;const inc0=useRef(incOk);inc0.current=incOk;
 
   // Gravação automática (só admin): só quando algo mudou de fato, com histórico
-  useEffect(()=>{if(!ok||!isAdmin)return;const snap=JSON.stringify({purchases:ps,people:ppl,baixas,incOk});if(snap===svRef.current)return;if(tr.current)clearTimeout(tr.current);
+  useEffect(()=>{if(!ok||!canEdit)return;const snap=JSON.stringify({purchases:ps,people:ppl,baixas,incOk});if(snap===svRef.current)return;if(tr.current)clearTimeout(tr.current);
     tr.current=setTimeout(async()=>{tr.current=null;const next={purchases:ps,people:ppl,baixas,incOk};const changes=diffData(baseRef.current,next);setSaving(true);
       try{
         if(!initFB()){const now=new Date().toISOString();await svLocal({...next,updatedAt:now});svRef.current=snap;baseRef.current=next;setLastUpdate(now);setHistory(h=>changes.length?[...h,{ts:now,user:user.email,changes}]:h);tt("Salvo localmente");return;}
@@ -649,11 +651,11 @@ function App(){
         <div style={{display:"flex",alignItems:"center",gap:5}}>
           {user.photoURL&&<img src={user.photoURL} style={{width:24,height:24,borderRadius:"50%"}} referrerPolicy="no-referrer"/>}
           <span style={{fontSize:10,color:Z.tx2}}>{user.displayName||user.email}</span>
-          <span style={{fontSize:8,padding:"2px 6px",borderRadius:4,background:isAdmin?`${Z.ac3}30`:`${Z.gn}30`,color:isAdmin?Z.ac:Z.gn,fontWeight:600}}>{isAdmin?"Admin":"Consulta"}</span>
+          <span style={{fontSize:8,padding:"2px 6px",borderRadius:4,background:isAdmin?`${Z.ac3}30`:canEdit?`${Z.yl}30`:`${Z.gn}30`,color:isAdmin?Z.ac:canEdit?Z.yl:Z.gn,fontWeight:600}}>{isAdmin?"Admin":canEdit?"Edição":"Consulta"}</span>
         </div>
-        <button onClick={()=>downloadBackup({purchases:ps,people:ppl,baixas,updatedAt:lastUpdate,history})} title="Baixa um arquivo JSON com todos os dados" style={{background:Z.cd2,color:Z.tx2,border:`1px solid ${Z.bd}`,borderRadius:6,padding:"6px 9px",fontSize:10,cursor:"pointer"}}>Backup</button>
-        {isAdmin&&<button onClick={()=>setSf(true)} style={{background:`linear-gradient(135deg,${Z.ac3},${Z.ac2})`,color:"#fff",border:"none",borderRadius:6,padding:"6px 12px",fontSize:11,fontWeight:600,cursor:"pointer",display:"flex",alignItems:"center",gap:4}}>+ Nova Compra</button>}
-        <button onClick={()=>exportXLSX(ps,baixas,ppl,mt)} style={{background:Z.cd2,color:Z.tx2,border:`1px solid ${Z.bd}`,borderRadius:6,padding:"6px 9px",fontSize:10,cursor:"pointer"}}>Exportar</button>
+        {isAdmin&&<button onClick={()=>downloadBackup({purchases:ps,people:ppl,baixas,updatedAt:lastUpdate,history})} title="Baixa um arquivo JSON com todos os dados" style={{background:Z.cd2,color:Z.tx2,border:`1px solid ${Z.bd}`,borderRadius:6,padding:"6px 9px",fontSize:10,cursor:"pointer"}}>Backup</button>}
+        {canEdit&&<button onClick={()=>setSf(true)} style={{background:`linear-gradient(135deg,${Z.ac3},${Z.ac2})`,color:"#fff",border:"none",borderRadius:6,padding:"6px 12px",fontSize:11,fontWeight:600,cursor:"pointer",display:"flex",alignItems:"center",gap:4}}>+ Nova Compra</button>}
+        {isAdmin&&<button onClick={()=>exportXLSX(ps,baixas,ppl,mt)} style={{background:Z.cd2,color:Z.tx2,border:`1px solid ${Z.bd}`,borderRadius:6,padding:"6px 9px",fontSize:10,cursor:"pointer"}}>Exportar</button>}
         <button onClick={handleLogout} style={{background:Z.cd2,color:Z.tx3,border:`1px solid ${Z.bd}`,borderRadius:6,padding:"6px 9px",fontSize:10,cursor:"pointer"}}>Sair</button>
       </div>
     </header>
@@ -668,18 +670,18 @@ function App(){
     </div>
 
     <main style={{padding:18,maxWidth:1100,margin:"0 auto",animation:"fi .25s ease"}}>
-      {tab==="dashboard"&&<Dash {...{mt,sm,setSm,cmp,td,ap,am,ps,baixas,setBaixas,isAdmin}}/>}
-      {tab==="purchases"&&<Purch {...{ps,setPs,sr,setSr,setEp,isAdmin}}/>}
-      {tab==="baixas"&&<BaixasView {...{baixas,setBaixas,mt,am,isAdmin}}/>}
+      {tab==="dashboard"&&<Dash {...{mt,sm,setSm,cmp,td,ap,am,ps,baixas,setBaixas}} isAdmin={canEdit}/>}
+      {tab==="purchases"&&<Purch {...{ps,setPs,sr,setSr,setEp}} isAdmin={canEdit}/>}
+      {tab==="baixas"&&<BaixasView {...{baixas,setBaixas,mt,am}} isAdmin={canEdit}/>}
       {/*tab==="people"&&<Ppl ppl={ppl} setPpl={setPpl} isAdmin={isAdmin}/>*/}
       {tab==="reports"&&<Rpts {...{ps,mt,am}}/>}
-      {tab==="relatorios"&&<Relat {...{ps,baixas,mt,am,incOk}}/>}
+      {tab==="relatorios"&&<Relat {...{ps,baixas,mt,am,incOk,isAdmin}}/>}
       {tab==="incons"&&isAdmin&&<Incons {...{ps,baixas,incOk,setIncOk,user}}/>}
       {tab==="history"&&<Hist history={history}/>}
     </main>
 
-    {sf&&<Frm onClose={()=>setSf(false)} onSave={p=>{setPs(v=>[...v,{...p,id:Date.now()}]);setSf(false);tt("Compra cadastrada!");}}/>}
-    {ep&&<Frm purchase={ep} onClose={()=>setEp(null)} onSave={p=>{setPs(v=>v.map(x=>x.id===ep.id?{...x,...p}:x));setEp(null);tt("Atualizado!");}}/>}
+    {sf&&<Frm lojas={lojasList} onClose={()=>setSf(false)} onSave={p=>{setPs(v=>[...v,{...p,id:Date.now()}]);setSf(false);tt("Compra cadastrada!");}}/>}
+    {ep&&<Frm lojas={lojasList} purchase={ep} onClose={()=>setEp(null)} onSave={p=>{setPs(v=>v.map(x=>x.id===ep.id?{...x,...p}:x));setEp(null);tt("Atualizado!");}}/>}
     {toast&&<div style={{position:"fixed",bottom:20,left:"50%",transform:"translateX(-50%)",background:Z.cd2,border:`1px solid ${Z.bd2}`,borderRadius:9,padding:"8px 18px",fontSize:11,color:Z.ac,animation:"ti .25s ease",zIndex:200,boxShadow:"0 6px 24px rgba(0,0,0,.5)"}}>{toast}</div>}
   </div>);
 }
@@ -762,6 +764,7 @@ function Dash({mt,sm,setSm,cmp,td,ap,am,ps,baixas,setBaixas,isAdmin}){
         </tr>))}</tbody>
       </table>)}
       {isAdmin&&(showAddBx?(<div style={{padding:10,background:Z.cd2,borderRadius:8,border:`1px solid ${Z.bd2}`,animation:"fi .15s ease"}}>
+        <ScanButton kind="baixa" onResult={r=>{if(r.valor)setBxAmt(moneyTxt(r.valor));if(r.data)setBxDate(r.data);setBxErr({});}}/>
         <div className="g3f">
           <div><label style={{fontSize:8,color:Z.tx3,display:"block",marginBottom:1}}>Valor (R$)</label>
             <div style={{position:"relative"}}><span style={{position:"absolute",left:6,top:"50%",transform:"translateY(-50%)",fontSize:9,color:Z.tx3}}>R$</span><input value={bxAmt} onChange={e=>{setBxAmt(maskMoney(e.target.value));setBxErr(p=>({...p,amt:undefined}));}} placeholder="0,00" inputMode="decimal" style={{...(bxErr.amt?bxIe:bxIs),paddingLeft:22}}/></div>
@@ -907,7 +910,86 @@ function parseMoney(v){const n=v.replace(/\./g,"").replace(",",".");const f=pars
 function maskInt(v){const d=v.replace(/\D/g,"");return d===""?"":String(Math.max(1,Math.min(48,parseInt(d)||1)));}
 function isValidDate(v){if(!v||v.length!==10)return false;const[dd,mm,yy]=v.split("/");const d=parseInt(dd),m=parseInt(mm),y=parseInt(yy);if(isNaN(d)||isNaN(m)||isNaN(y))return false;if(m<1||m>12||d<1||d>31||y<2020||y>2040)return false;const dt=new Date(y,m-1,d);return dt.getFullYear()===y&&dt.getMonth()===m-1&&dt.getDate()===d;}
 
-function Frm({purchase:pu,onClose,onSave}){
+
+// ─── LEITURA DE COMPROVANTES (OCR no próprio aparelho, com Tesseract.js hospedado em /ocr) ───
+// Interpreta o texto lido de um comprovante (compra no cartão ou pagamento/baixa)
+const nrmTxt=s=>s.normalize("NFD").replace(/[̀-ͯ]/g,"").toUpperCase();
+function parseReceipt(text,kind,lojas){
+  const lines=text.split(/\r?\n/).map(l=>l.trim()).filter(Boolean);const U=lines.map(nrmTxt);
+  const out={};
+  // valores: 1.234,56 | 1234,56 | 1234.56 (OCR às vezes troca vírgula por ponto)
+  const moneyRe=/(?:R\$|RS|R5)?\s*(\d{1,3}(?:[.\s]\d{3})*[,.]\d{2}|\d+[,.]\d{2})(?!\d)/g;
+  const toNum=s=>{s=s.replace(/\s/g,"");const m=s.match(/^(.*)[,.](\d{2})$/);return m?parseFloat(m[1].replace(/[.,]/g,"")+"."+m[2]):NaN;};
+  const vals=(i)=>[...lines[i].matchAll(moneyRe)].map(m=>toNum(m[1])).filter(v=>v>0&&v<1e7);
+  const kwTot=kind==="baixa"?/(VALOR\s*(DO\s*)?(PAGAMENTO|PAGO|TOTAL|DA TRANSFERENCIA|DO PIX)?|TOTAL\s*PAGO|VALOR)/:/(VALOR\s*TOTAL|TOTAL\s*(DA COMPRA|GERAL|A PAGAR)?|VALOR\s*(DA COMPRA|APROVADO)?|VLR)/;
+  let valor=null;
+  for(let i=0;i<U.length&&valor==null;i++){if(kwTot.test(U[i])&&!/PARCELA|TROCO|DESCONTO|TAXA|JUROS/.test(U[i])){let v=vals(i);if(!v.length&&i+1<lines.length)v=vals(i+1);if(v.length)valor=v[v.length-1];}}
+  if(valor==null){const all=lines.flatMap((_,i)=>vals(i));if(all.length)valor=Math.max(...all);}
+  if(valor!=null)out.valor=Math.round(valor*100)/100;
+  // data: dd/mm/aaaa, dd/mm/aa, dd.mm.aaaa, dd-mm-aaaa
+  const kwData=kind==="baixa"?/(PAGAMENTO|PAGO EM|REALIZAD|EFETUAD|DATA)/:/(DATA|EMISSAO|COMPRA)/;
+  const dRe=/(\d{2})\s?[\/.\-]\s?(\d{2})\s?[\/.\-]\s?(\d{4}|\d{2})(?!\d)/;
+  const okD=(d,m,y)=>{y=y.length===2?"20"+y:y;const D=+d,M=+m,Y=+y;if(M<1||M>12||D<1||D>31||Y<2015||Y>2100)return null;return`${d}/${m}/${y}`;};
+  const findDate=(pred)=>{for(let i=0;i<U.length;i++){if(!pred(i))continue;for(const j of[i,i+1]){if(j>=lines.length)continue;const m=lines[j].match(dRe);if(m){const r=okD(m[1],m[2],m[3]);if(r)return r;}}}return null;};
+  out.data=findDate(i=>kwData.test(U[i]))||findDate(()=>true)||undefined;
+  // texto por extenso: "15 de outubro de 2026"
+  if(!out.data){const mes=["JANEIRO","FEVEREIRO","MARCO","ABRIL","MAIO","JUNHO","JULHO","AGOSTO","SETEMBRO","OUTUBRO","NOVEMBRO","DEZEMBRO"];for(const u of U){const m=u.match(/(\d{1,2})\s+DE\s+([A-Z]+)\s+DE\s+(\d{4})/);if(m&&mes.includes(m[2])){out.data=`${m[1].padStart(2,"0")}/${String(mes.indexOf(m[2])+1).padStart(2,"0")}/${m[3]}`;break;}}}
+  if(!out.data)delete out.data;
+  if(kind!=="baixa"){
+    // parcelas: "3X", "EM 3 PARCELAS", "PARCELADO 3", "QTD PARCELAS: 3"
+    for(const u of U){let m=u.match(/(?:EM\s*)?(\d{1,2})\s*X\b/)||u.match(/(\d{1,2})\s*(?:PARCELAS|VEZES)/)||u.match(/PARCELAS?\s*:?\s*(\d{1,2})\b/)||u.match(/PARCELADO\D{0,12}(\d{1,2})\b/);
+      if(m){const n=+m[1];if(n>=1&&n<=48){out.parcelas=n;break;}}}
+    if(!out.parcelas&&U.some(u=>/A VISTA|AVISTA|CREDITO A VISTA/.test(u)))out.parcelas=1;
+    // loja: nome já cadastrado que aparece no texto; senão a primeira linha "de nome"
+    const full=nrmTxt(text).replace(/[^A-Z0-9 ]/g," ");
+    const known=(lojas||[]).map(l=>({l,k:nrmTxt(l).replace(/[^A-Z0-9 ]/g," ").replace(/\s+/g," ").trim()})).filter(x=>x.k.length>=3).sort((a,b)=>b.k.length-a.k.length);
+    const hit=known.find(x=>full.replace(/\s+/g," ").includes(x.k));
+    if(hit)out.loja=hit.l;
+    else{const bad=/(CNPJ|CPF|COMPROVANTE|VIA|CLIENTE|ESTABELECIMENTO|CARTAO|CREDITO|DEBITO|VISA|MASTER|ELO|DATA|HORA|VALOR|TOTAL|AUTORIZ|TERMINAL|NSU|DOC|CUPOM|FISCAL|NOTA|ENDERECO|RUA|AV\b|TEL|R\$|\d{4})/;
+      for(let i=0;i<Math.min(U.length,8);i++){const u=U[i];if(bad.test(u))continue;const letters=(u.match(/[A-Z]/g)||[]).length;if(letters>=3&&letters/u.length>.5){out.loja=lines[i].replace(/\s+/g," ").toLowerCase().replace(/(^|\s)\S/g,c=>c.toUpperCase()).trim();break;}}}
+  }
+  return out;
+}
+let ocrWorker=null;
+function ocrBase(){return new URL(IS_HML?"../ocr/":"ocr/",location.href).href;}
+function loadScript(src){return new Promise((ok,err)=>{const s=document.createElement("script");s.src=src;s.onload=ok;s.onerror=()=>err(new Error("Falha ao carregar o leitor"));document.head.appendChild(s);});}
+async function getOcr(onProg){
+  if(ocrWorker)return ocrWorker;
+  const b=ocrBase();if(typeof Tesseract==="undefined")await loadScript(b+"tesseract.min.js");
+  ocrWorker=await Tesseract.createWorker("por",1,{workerPath:b+"worker.min.js",corePath:b+"core",langPath:b+"lang",gzip:true,logger:m=>{if(m.status==="recognizing text"&&onProg)onProg(m.progress);}});
+  return ocrWorker;
+}
+// reduz fotos grandes (câmera do celular) para acelerar a leitura
+function prepImage(file){return new Promise((ok,err)=>{const img=new Image();img.onload=()=>{const k=Math.min(1,2000/Math.max(img.width,img.height));const c=document.createElement("canvas");c.width=Math.round(img.width*k);c.height=Math.round(img.height*k);const x=c.getContext("2d");x.filter="grayscale(1) contrast(1.3)";x.drawImage(img,0,0,c.width,c.height);URL.revokeObjectURL(img.src);ok(c);};img.onerror=()=>err(new Error("Imagem inválida"));img.src=URL.createObjectURL(file);});}
+const SCAN_LABELS={valor:"valor",data:"data",parcelas:"parcelas",loja:"loja"};
+function ScanButton({kind,lojas,onResult}){
+  const[st,setSt]=useState(null);const[prog,setProg]=useState(0);const[res,setRes]=useState(null);const[txt,setTxt]=useState("");const[show,setShow]=useState(false);const[thumb,setThumb]=useState(null);
+  const ref=useRef(null);
+  const want=kind==="baixa"?["valor","data"]:["loja","valor","parcelas","data"];
+  const go=async f=>{if(!f)return;setSt("lendo");setProg(0);setRes(null);setThumb(URL.createObjectURL(f));
+    try{const c=await prepImage(f);const w=await getOcr(setProg);const{data}=await w.recognize(c);const r=parseReceipt(data.text,kind,lojas);setTxt(data.text);setRes(r);setSt("ok");onResult(r);}
+    catch(e){setSt("erro");setTxt(String(e?.message||e));}};
+  const lidos=res?want.filter(k=>res[k]!=null):[];const faltam=res?want.filter(k=>res[k]==null):[];
+  return(<div style={{marginBottom:10}}>
+    <input ref={ref} type="file" accept="image/*" style={{display:"none"}} onChange={e=>{go(e.target.files[0]);e.target.value="";}}/>
+    <button type="button" onClick={()=>ref.current.click()} disabled={st==="lendo"} style={{width:"100%",background:`${Z.ac3}20`,color:Z.ac,border:`1px dashed ${Z.ac3}80`,borderRadius:6,padding:"8px 10px",fontSize:11,fontWeight:600,cursor:st==="lendo"?"wait":"pointer",fontFamily:Z.ft}}>{st==="lendo"?`Lendo a imagem… ${Math.round(prog*100)}%`:"📷 Preencher a partir de foto do comprovante"}</button>
+    {st&&st!=="lendo"&&(<div style={{display:"flex",gap:8,marginTop:6,alignItems:"flex-start"}}>
+      {thumb&&<img src={thumb} style={{width:44,height:44,objectFit:"cover",borderRadius:4,border:`1px solid ${Z.bd2}`,flexShrink:0}}/>}
+      <div style={{fontSize:10,lineHeight:1.5,flex:1}}>
+        {st==="erro"&&<div style={{color:Z.rd}}>Não foi possível ler a imagem ({txt}). Preencha manualmente.</div>}
+        {st==="ok"&&<>
+          {lidos.length>0&&<div style={{color:Z.gn}}>Preenchido pela imagem: {lidos.map(k=>SCAN_LABELS[k]).join(", ")}. <b>Confira antes de salvar.</b></div>}
+          {faltam.length>0&&<div style={{color:Z.yl}}>Não identificado: {faltam.map(k=>SCAN_LABELS[k]).join(", ")}. Preencha manualmente.</div>}
+          <button type="button" onClick={()=>setShow(!show)} style={{background:"none",border:"none",color:Z.tx3,fontSize:9,padding:0,cursor:"pointer",fontFamily:Z.ft}}>{show?"▾ ocultar texto lido":"▸ ver texto lido"}</button>
+          {show&&<pre style={{whiteSpace:"pre-wrap",fontSize:9,color:Z.tx2,background:Z.bg,padding:6,borderRadius:4,maxHeight:120,overflowY:"auto",margin:"4px 0 0"}}>{txt}</pre>}
+        </>}
+      </div>
+    </div>)}
+  </div>);
+}
+const moneyTxt=v=>maskMoney(v.toFixed(2).replace(".",","));
+
+function Frm({purchase:pu,onClose,onSave,lojas}){
   const initTotal=pu?.total?maskMoney(pu.total.toFixed(2).replace(".",",")):"";
   const[lj,setLj]=useState(pu?.loja||"");
   const[tt,setTt]=useState(initTotal);
@@ -941,6 +1023,7 @@ function Frm({purchase:pu,onClose,onSave}){
   return(<div onClick={onClose} style={{position:"fixed",inset:0,background:"rgba(0,0,0,.75)",display:"flex",alignItems:"center",justifyContent:"center",zIndex:100,backdropFilter:"blur(5px)"}}>
     <div onClick={e=>e.stopPropagation()} className="modal-inner" style={{background:Z.cd,border:`1px solid ${Z.bd2}`,borderRadius:13,padding:22,width:"90%",maxWidth:400,animation:"fi .2s ease"}}>
       <h2 style={{margin:"0 0 16px",fontSize:15,fontWeight:600}}>{pu?"Editar Compra":"Nova Compra"}</h2>
+      <ScanButton kind="compra" lojas={lojas} onResult={r=>{if(r.loja)setLj(r.loja);if(r.valor)setTt(moneyTxt(r.valor));if(r.parcelas)setPc(String(r.parcelas));if(r.data)setDt(r.data);setErrors({});}}/>
       <div style={{display:"flex",flexDirection:"column",gap:10}}>
         <div><label style={{fontSize:10,color:Z.tx3,display:"block",marginBottom:2}}>Loja</label><input value={lj} onChange={e=>{setLj(e.target.value);setErrors(p=>({...p,lj:undefined}));}} placeholder="Nome da loja" style={errors.lj?ie:is}/>{errors.lj&&<div style={eStyle}>{errors.lj}</div>}</div>
         <div className="g2f">
@@ -1136,6 +1219,7 @@ function BaixasView({baixas,setBaixas,mt,am,isAdmin}){
 
       {isAdmin&&showAdd&&(<div style={{padding:12,background:Z.cd2,borderRadius:8,border:`1px solid ${Z.bd2}`,marginBottom:12,animation:"fi .15s ease"}}>
         <div style={{fontSize:10,fontWeight:600,color:Z.ac,marginBottom:8}}>Registrar Baixa — {selM}</div>
+        <ScanButton kind="baixa" onResult={r=>{if(r.valor)setBAmt(moneyTxt(r.valor));if(r.data)setBDate(r.data);setBErr({});}}/>
         <div className="g3f">
           <div><label style={{fontSize:9,color:Z.tx3,display:"block",marginBottom:2}}>Valor (R$)</label>
             <div style={{position:"relative"}}><span style={{position:"absolute",left:7,top:"50%",transform:"translateY(-50%)",fontSize:10,color:Z.tx3}}>R$</span><input value={bAmt} onChange={e=>{setBAmt(maskMoney(e.target.value));setBErr(p=>({...p,amt:undefined}));}} placeholder="0,00" inputMode="decimal" style={{...(bErr.amt?ie:is),paddingLeft:24}}/></div>
