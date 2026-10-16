@@ -35,6 +35,8 @@ const MO=(()=>{const a=[];const fy=new Date().getFullYear()+10;for(let y=2023;y<
 function pmk(k){if(!k)return null;const p=k.split("/");if(p.length!==2)return null;return{month:MM[p[0]]??0,year:parseInt(p[1])};}
 function cmk(){const n=new Date();return`${MN[n.getMonth()]}/${n.getFullYear()}`;}
 function fB(v){if(v==null||isNaN(v))return"R$ 0,00";const n=Object.is(v,-0)||Math.abs(v)<0.005?0:v;return"R$ "+n.toLocaleString("pt-BR",{minimumFractionDigits:2,maximumFractionDigits:2});}
+// Chave numérica (aaaammdd) da data da compra, para ordenar; aceita dd/mm/aa e dd/mm/aaaa
+function dKey(p){const d=p.data;if(!d)return 0;const m=d.match(/^(\d{2})\/(\d{2})\/(\d{2}|\d{4})$/);if(!m)return 0;const y=m[3].length===2?2000+ +m[3]:+m[3];return y*1e4+ +m[2]*100+ +m[1];}
 function fD(d){if(!d)return"—";if(d.includes("-")){const p=d.split("-");if(p[0].length===4)return`${p[2]}/${p[1]}/${p[0]}`;}return d;}
 
 function calcStartMonth(dateStr){
@@ -518,7 +520,7 @@ function Dash({mt,sm,setSm,cmp,td,ap,am,ps,baixas,setBaixas,isAdmin}){
           </div>
         </>):(<>
           <div style={{fontSize:11,fontWeight:600,color:Z.ac,marginBottom:12}}>Parcelas do Mês</div>
-          <div style={{maxHeight:220,overflowY:"auto"}}>{cmp.slice(0,12).map(p=>(<div key={p.id} style={{display:"flex",justifyContent:"space-between",padding:"5px 0",borderBottom:`1px solid ${Z.bd}`,fontSize:11}}><div><span>{p.loja}</span><span style={{color:Z.tx3,marginLeft:5,fontSize:9}}>{p.parcelas}x</span></div><span style={{fontFamily:Z.mn,color:Z.ac}}>{fB(p.monthly[sm])}</span></div>))}{cmp.length>12&&<div style={{color:Z.tx3,fontSize:10,padding:"4px 0"}}>+{cmp.length-12} mais</div>}</div>
+          <div style={{maxHeight:220,overflowY:"auto"}}>{[...cmp].sort((a,b)=>dKey(b)-dKey(a)).map(p=>(<div key={p.id} style={{display:"grid",gridTemplateColumns:"1fr auto auto",alignItems:"center",gap:10,padding:"5px 0",borderBottom:`1px solid ${Z.bd}`,fontSize:11}}><div style={{minWidth:0,overflow:"hidden",textOverflow:"ellipsis",whiteSpace:"nowrap"}}><span>{p.loja}</span><span style={{color:Z.tx3,marginLeft:5,fontSize:9}}>{p.parcelas}x</span></div><span style={{fontFamily:Z.mn,fontSize:10,color:Z.tx2}}>{fD(p.data)}</span><span style={{fontFamily:Z.mn,color:Z.ac,textAlign:"right"}}>{fB(p.monthly[sm])}</span></div>))}</div>
         </>)}
       </div>
     </div>
