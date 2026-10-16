@@ -211,44 +211,144 @@ function exportXLSX(ps,baixas,ppl,mt){
   XLSX.writeFile(wb,`CPC_Export_${ts}.xlsx`);
 }
 
-// Impressão dos lançamentos do mês (opcionalmente com as baixas)
-function PrintMonth({sm,ps,baixas,mt,onClose}){
-  const[withBx,setWithBx]=useState(false);
-  const rows=ps.filter(p=>p.monthly[sm]>0).sort((a,b)=>dKey(b)-dKey(a)).map(p=>{const k=Object.keys(p.monthly).sort((x,y)=>MO.indexOf(x)-MO.indexOf(y));return{...p,v:p.monthly[sm],n:k.indexOf(sm)+1,N:Math.max(p.parcelas||0,k.length)};});
-  const tot=mt[sm]||0;const bx=baixas[sm]||[];const tb=bx.reduce((s,b)=>s+b.amount,0);
-  const now=new Date().toLocaleString("pt-BR",{day:"2-digit",month:"2-digit",year:"numeric",hour:"2-digit",minute:"2-digit"});
-  const th={textAlign:"left",padding:"6px 8px",borderBottom:"2px solid #333",fontSize:11};const td={padding:"5px 8px",borderBottom:"1px solid #ddd",fontSize:11};const R={textAlign:"right",whiteSpace:"nowrap"};const tf={...td,fontWeight:700,borderTop:"2px solid #333",borderBottom:"none"};
+// ─── IMPRESSÃO E RELATÓRIOS ───
+const pTh={textAlign:"left",padding:"6px 8px",borderBottom:"2px solid #333",fontSize:11};
+const pTd={padding:"5px 8px",borderBottom:"1px solid #ddd",fontSize:11,verticalAlign:"top"};
+const pR={textAlign:"right",whiteSpace:"nowrap"};
+const pTf={...pTd,fontWeight:700,borderTop:"2px solid #333",borderBottom:"none"};
+const nowBR=()=>new Date().toLocaleString("pt-BR",{day:"2-digit",month:"2-digit",year:"numeric",hour:"2-digit",minute:"2-digit"});
+// Janela com prévia em folha branca; ao imprimir, só a folha sai no papel
+function PrintShell({controls,onClose,children}){
   const btn={border:"none",borderRadius:6,padding:"8px 16px",fontSize:12,fontWeight:600,cursor:"pointer",fontFamily:Z.ft};
   return ReactDOM.createPortal(<div className="print-modal" style={{position:"fixed",inset:0,background:"rgba(0,0,0,.7)",zIndex:300,overflowY:"auto",padding:16,fontFamily:Z.ft}}>
     <div className="no-print" style={{maxWidth:760,margin:"0 auto 10px",display:"flex",justifyContent:"space-between",alignItems:"center",gap:10,flexWrap:"wrap",background:Z.cd,border:`1px solid ${Z.bd2}`,borderRadius:10,padding:"10px 14px"}}>
-      <label style={{display:"flex",alignItems:"center",gap:8,fontSize:12,color:Z.tx,cursor:"pointer"}}><input type="checkbox" checked={withBx} onChange={e=>setWithBx(e.target.checked)} style={{width:16,height:16,accentColor:Z.ac2}}/>Incluir as baixas do mês</label>
+      <div style={{display:"flex",alignItems:"center",gap:10,flexWrap:"wrap"}}>{controls}</div>
       <div style={{display:"flex",gap:6}}><button onClick={()=>window.print()} style={{...btn,background:`linear-gradient(135deg,${Z.ac3},${Z.ac2})`,color:"#fff"}}>Imprimir</button><button onClick={onClose} style={{...btn,background:Z.cd2,color:Z.tx2,border:`1px solid ${Z.bd}`}}>Fechar</button></div>
     </div>
-    <div className="print-sheet" style={{maxWidth:760,margin:"0 auto",background:"#fff",color:"#111",borderRadius:6,padding:"clamp(14px,4vw,30px)",fontFamily:"Arial,Helvetica,sans-serif"}}>
-      <div style={{display:"flex",justifyContent:"space-between",alignItems:"flex-end",borderBottom:"2px solid #111",paddingBottom:8,marginBottom:14,gap:10,flexWrap:"wrap"}}>
-        <div><div style={{fontSize:11,color:"#555"}}>CPC – Controle de Pagamentos com Cartão{IS_HML?" (homologação)":""}</div><div style={{fontSize:20,fontWeight:700}}>Lançamentos – {sm}</div></div>
-        <div style={{fontSize:10,color:"#555"}}>Impresso em {now}</div>
-      </div>
-      <table style={{width:"100%",borderCollapse:"collapse"}}>
-        <thead><tr><th style={th}>Data da compra</th><th style={th}>Loja</th><th style={{...th,textAlign:"center"}}>Parcela</th><th style={{...th,...R}}>Valor</th></tr></thead>
-        <tbody>{rows.map(p=>(<tr key={p.id}><td style={td}>{fD(p.data)}</td><td style={td}>{p.loja}</td><td style={{...td,textAlign:"center"}}>{p.n}/{p.N}</td><td style={{...td,...R}}>{fB(p.v)}</td></tr>))}</tbody>
-        <tfoot><tr><td style={tf} colSpan={3}>Total do mês ({rows.length} lançamento{rows.length!==1?"s":""})</td><td style={{...tf,...R}}>{fB(tot)}</td></tr></tfoot>
-      </table>
-      {withBx&&(<div style={{marginTop:24}}>
-        <div style={{fontSize:14,fontWeight:700,marginBottom:6}}>Baixas – {sm}</div>
-        {bx.length?(<table style={{width:"100%",borderCollapse:"collapse"}}>
-          <thead><tr><th style={th}>#</th><th style={th}>Data do pagamento</th><th style={{...th,...R}}>Valor</th></tr></thead>
-          <tbody>{bx.map((b,i)=>(<tr key={i}><td style={td}>{i+1}</td><td style={td}>{fD(b.date)}</td><td style={{...td,...R}}>{fB(b.amount)}</td></tr>))}</tbody>
-          <tfoot><tr><td style={tf} colSpan={2}>Total de baixas</td><td style={{...tf,...R}}>{fB(tb)}</td></tr></tfoot>
-        </table>):(<div style={{fontSize:11,color:"#555"}}>Nenhuma baixa registrada neste mês.</div>)}
-        <table style={{marginTop:14,marginLeft:"auto",borderCollapse:"collapse",fontSize:12}}><tbody>
-          <tr><td style={{padding:"3px 10px"}}>Total do mês</td><td style={{padding:"3px 0",...R}}>{fB(tot)}</td></tr>
-          <tr><td style={{padding:"3px 10px"}}>Baixas</td><td style={{padding:"3px 0",...R}}>{fB(tb)}</td></tr>
-          <tr><td style={{padding:"3px 10px",fontWeight:700,borderTop:"1px solid #333"}}>{tb-tot>=0?"Saldo do mês":"Falta pagar"}</td><td style={{padding:"3px 0",fontWeight:700,borderTop:"1px solid #333",...R}}>{fB(Math.abs(tb-tot))}</td></tr>
-        </tbody></table>
-      </div>)}
-    </div>
+    <div className="print-sheet" style={{maxWidth:760,margin:"0 auto",background:"#fff",color:"#111",borderRadius:6,padding:"clamp(14px,4vw,30px)",fontFamily:"Arial,Helvetica,sans-serif"}}>{children}</div>
   </div>,document.body);
+}
+function SheetHead({title}){
+  return(<div style={{display:"flex",justifyContent:"space-between",alignItems:"flex-end",borderBottom:"2px solid #111",paddingBottom:8,marginBottom:14,gap:10,flexWrap:"wrap"}}>
+    <div><div style={{fontSize:11,color:"#555"}}>CPC – Controle de Pagamentos com Cartão{IS_HML?" (homologação)":""}</div><div style={{fontSize:20,fontWeight:700}}>{title}</div></div>
+    <div style={{fontSize:10,color:"#555"}}>Impresso em {nowBR()}</div>
+  </div>);
+}
+// Folha do mês: lançamentos e/ou baixas
+function MonthSheet({sm,ps,baixas,mt,showL,showB}){
+  const rows=ps.filter(p=>p.monthly[sm]>0).sort((a,b)=>dKey(b)-dKey(a)).map(p=>{const k=Object.keys(p.monthly).sort((x,y)=>MO.indexOf(x)-MO.indexOf(y));return{...p,v:p.monthly[sm],n:k.indexOf(sm)+1,N:Math.max(p.parcelas||0,k.length)};});
+  const tot=mt[sm]||0;const bx=baixas[sm]||[];const tb=bx.reduce((s,b)=>s+b.amount,0);
+  const title=showL&&showB?`Lançamentos e baixas – ${sm}`:showL?`Lançamentos – ${sm}`:`Baixas – ${sm}`;
+  return(<>
+    <SheetHead title={title}/>
+    {showL&&(rows.length?(<table style={{width:"100%",borderCollapse:"collapse"}}>
+      <thead><tr><th style={pTh}>Data da compra</th><th style={pTh}>Loja</th><th style={{...pTh,textAlign:"center"}}>Parcela</th><th style={{...pTh,...pR}}>Valor</th></tr></thead>
+      <tbody>{rows.map(p=>(<tr key={p.id}><td style={pTd}>{fD(p.data)}</td><td style={pTd}>{p.loja}</td><td style={{...pTd,textAlign:"center"}}>{p.n}/{p.N}</td><td style={{...pTd,...pR}}>{fB(p.v)}</td></tr>))}</tbody>
+      <tfoot><tr><td style={pTf} colSpan={3}>Total do mês ({rows.length} lançamento{rows.length!==1?"s":""})</td><td style={{...pTf,...pR}}>{fB(tot)}</td></tr></tfoot>
+    </table>):(<div style={{fontSize:11,color:"#555"}}>Nenhum lançamento neste mês.</div>))}
+    {showB&&(<div style={{marginTop:showL?24:0}}>
+      {showL&&<div style={{fontSize:14,fontWeight:700,marginBottom:6}}>Baixas – {sm}</div>}
+      {bx.length?(<table style={{width:"100%",borderCollapse:"collapse"}}>
+        <thead><tr><th style={pTh}>#</th><th style={pTh}>Data do pagamento</th><th style={{...pTh,...pR}}>Valor</th></tr></thead>
+        <tbody>{bx.map((b,i)=>(<tr key={i}><td style={pTd}>{i+1}</td><td style={pTd}>{fD(b.date)}</td><td style={{...pTd,...pR}}>{fB(b.amount)}</td></tr>))}</tbody>
+        <tfoot><tr><td style={pTf} colSpan={2}>Total de baixas</td><td style={{...pTf,...pR}}>{fB(tb)}</td></tr></tfoot>
+      </table>):(<div style={{fontSize:11,color:"#555"}}>Nenhuma baixa registrada neste mês.</div>)}
+    </div>)}
+    {showL&&showB&&(<table style={{marginTop:14,marginLeft:"auto",borderCollapse:"collapse",fontSize:12}}><tbody>
+      <tr><td style={{padding:"3px 10px"}}>Total do mês</td><td style={{padding:"3px 0",...pR}}>{fB(tot)}</td></tr>
+      <tr><td style={{padding:"3px 10px"}}>Baixas</td><td style={{padding:"3px 0",...pR}}>{fB(tb)}</td></tr>
+      <tr><td style={{padding:"3px 10px",fontWeight:700,borderTop:"1px solid #333"}}>{tb-tot>=0?"Saldo do mês":"Falta pagar"}</td><td style={{padding:"3px 0",fontWeight:700,borderTop:"1px solid #333",...pR}}>{fB(Math.abs(tb-tot))}</td></tr>
+    </tbody></table>)}
+  </>);
+}
+// Impressão rápida do Dashboard: lançamentos, com opção de incluir as baixas
+function PrintMonth({sm,ps,baixas,mt,onClose}){
+  const[withBx,setWithBx]=useState(false);
+  return(<PrintShell onClose={onClose} controls={<label style={{display:"flex",alignItems:"center",gap:8,fontSize:12,color:Z.tx,cursor:"pointer"}}><input type="checkbox" checked={withBx} onChange={e=>setWithBx(e.target.checked)} style={{width:16,height:16,accentColor:Z.ac2}}/>Incluir as baixas do mês</label>}>
+    <MonthSheet {...{sm,ps,baixas,mt}} showL={true} showB={withBx}/>
+  </PrintShell>);
+}
+
+// Verificações de consistência dos dados
+const mIdx=m=>MO.indexOf(m);
+const nrm=s=>s.normalize("NFD").replace(/[̀-ͯ]/g,"").toLowerCase().replace(/[^a-z0-9 ]/g," ").split(/\s+/).filter(w=>w&&!["de","da","das","do","dos","e"].includes(w));
+// Parecidos: todas as palavras (2+ letras) de um nome aparecem no outro, inteiras ou abreviadas, com ao menos uma de 3+ letras
+function similarNames(a,b){const A=nrm(a).filter(w=>w.length>=2),B=nrm(b).filter(w=>w.length>=2);if(!A.length||!B.length)return false;const sub=(s,l)=>s.every(w=>l.some(x=>x===w||x.startsWith(w)))&&s.some(w=>w.length>=3);return sub(A,B)||sub(B,A);}
+function findIncons(ps,baixas){
+  const out=[];const add=(sev,cat,title,detail)=>out.push({sev,cat,title,detail});
+  ps.forEach(p=>{
+    const k=Object.keys(p.monthly||{}).sort((a,b)=>mIdx(a)-mIdx(b));const vals=k.map(m=>p.monthly[m]);const n=k.length;
+    const soma=Math.round(vals.reduce((s,v)=>s+v,0)*100)/100;const lbl=`${p.loja} (${fD(p.data)}) – id ${p.id}`;
+    // entrada + parcelas iguais (ex.: Iphone): não é inconsistência
+    const entrada=n===p.parcelas+1&&Math.abs(soma-p.total)<=0.1&&vals.slice(1).every(v=>v===vals[1])&&vals[0]!==vals[1];
+    if(!entrada&&n!==p.parcelas)add("Erro","Parcelas × meses lançados",lbl,`${p.parcelas} parcelas, mas ${n} meses lançados (${k.join(", ")}).`);
+    if(!entrada&&Math.abs(soma-p.total)>Math.max(.05,.01*n))add("Erro","Soma das parcelas × total",lbl,`Meses somam ${fB(soma)}; total da compra ${fB(p.total)} (diferença ${fB(Math.abs(soma-p.total))}).`);
+    if(k.some((m,i)=>i&&mIdx(m)-mIdx(k[i-1])!==1))add("Erro","Meses fora de sequência",lbl,`Meses lançados: ${k.join(", ")}.`);
+    if(vals.some(v=>!(v>0)))add("Erro","Valor inválido",lbl,"Há parcela com valor zero ou negativo.");
+    if(!p.data)add("Atenção","Compra sem data",lbl,`Primeiro mês lançado: ${k[0]||"—"}.`);
+    else if(!dKey(p))add("Erro","Data da compra inválida",lbl,`Data registrada: "${p.data}".`);
+  });
+  Object.keys(baixas).sort((a,b)=>mIdx(a)-mIdx(b)).forEach(m=>{
+    const mi=mIdx(m);const seen={};
+    (baixas[m]||[]).forEach((b,i)=>{
+      const lbl=`Baixa ${i+1} de ${m}`;const d=/^(\d{2})\/(\d{2})\/(\d{4})$/.exec(b.date||"");
+      if(!(b.amount>0))add("Erro","Valor inválido",lbl,`Valor: ${fB(b.amount)}.`);
+      if(!d)add("Erro","Data de baixa inválida",lbl,`Data registrada: "${b.date}".`);
+      else{const j=mIdx(`${MN[+d[2]-1]}/${d[3]}`);if(j!==mi&&j!==mi-1)add("Erro","Baixa fora do período da fatura",lbl,`${fB(b.amount)} pago em ${b.date}; esperado entre o mês anterior e ${m}.`);}
+      const key=b.amount+"|"+b.date;seen[key]=(seen[key]||0)+1;if(seen[key]===2)add("Atenção","Possível baixa duplicada",`Baixas de ${m}`,`Mais de uma baixa de ${fB(b.amount)} em ${fD(b.date)}. Confirme se foram pagamentos distintos.`);
+    });
+  });
+  const names=[...new Set(ps.map(p=>p.loja))].sort();const used=new Set();
+  names.forEach(a=>{if(used.has(a))return;const g=names.filter(b=>b!==a&&!used.has(b)&&similarNames(a,b));if(g.length){[a,...g].forEach(x=>used.add(x));add("Atenção","Nomes de loja parecidos",[a,...g].join(" / "),"Podem ser a mesma loja escrita de formas diferentes.");}});
+  return[...out.filter(i=>i.sev==="Erro"),...out.filter(i=>i.sev!=="Erro")];
+}
+function IncSheet({items}){
+  const cats=[...new Set(items.map(i=>i.cat))];
+  return(<>
+    <SheetHead title="Relatório de inconsistências"/>
+    {!items.length&&<div style={{fontSize:12}}>Nenhuma inconsistência encontrada.</div>}
+    {items.length>0&&<div style={{fontSize:11,color:"#333",marginBottom:12}}>{items.filter(i=>i.sev==="Erro").length} erro(s) e {items.filter(i=>i.sev==="Atenção").length} ponto(s) de atenção.</div>}
+    {cats.map(c=>{const l=items.filter(i=>i.cat===c);return(<div key={c} style={{marginBottom:16,breakInside:"avoid"}}>
+      <div style={{fontSize:13,fontWeight:700,marginBottom:4}}>{c} <span style={{fontWeight:400,color:"#555"}}>({l.length}) – {l[0].sev}</span></div>
+      <table style={{width:"100%",borderCollapse:"collapse"}}><tbody>{l.map((i,k)=>(<tr key={k}><td style={{...pTd,width:"38%",fontWeight:600}}>{i.title}</td><td style={pTd}>{i.detail}</td></tr>))}</tbody></table>
+    </div>);})}
+  </>);
+}
+// Aba Relatórios
+function Relat({ps,baixas,mt,am}){
+  const months=[...am].reverse();
+  const[m,setM]=useState(am.includes(cmk())?cmk():months[0]);const[tipo,setTipo]=useState("ambos");const[open,setOpen]=useState(null);
+  const inc=useMemo(()=>findIncons(ps,baixas),[ps,baixas]);
+  const card={background:Z.cd,border:`1px solid ${Z.bd}`,borderRadius:10,padding:16,marginBottom:18};
+  const sel={background:Z.cd2,color:Z.tx,border:`1px solid ${Z.bd}`,borderRadius:6,padding:"6px 9px",fontSize:12,fontFamily:Z.ft};
+  const btn={background:`linear-gradient(135deg,${Z.ac3},${Z.ac2})`,color:"#fff",border:"none",borderRadius:6,padding:"8px 16px",fontSize:12,fontWeight:600,cursor:"pointer",fontFamily:Z.ft};
+  const tipos=[["ambos","Lançamentos e baixas"],["lanc","Só lançamentos"],["bx","Só baixas"]];
+  const nErr=inc.filter(i=>i.sev==="Erro").length,nAt=inc.length-nErr;
+  return(<div>
+    <div style={card}>
+      <div style={{fontSize:12,fontWeight:600,color:Z.ac,marginBottom:12}}>Lançamentos e baixas do mês</div>
+      <div style={{display:"flex",gap:14,flexWrap:"wrap",alignItems:"center",marginBottom:14}}>
+        <label style={{fontSize:11,color:Z.tx2,display:"flex",alignItems:"center",gap:6}}>Mês<select value={m} onChange={e=>setM(e.target.value)} style={sel}>{months.map(x=><option key={x} value={x}>{x}</option>)}</select></label>
+        <div style={{display:"flex",gap:12,flexWrap:"wrap"}}>{tipos.map(([v,l])=>(<label key={v} style={{fontSize:12,color:Z.tx,display:"flex",alignItems:"center",gap:5,cursor:"pointer"}}><input type="radio" name="tipo" checked={tipo===v} onChange={()=>setTipo(v)} style={{accentColor:Z.ac2}}/>{l}</label>))}</div>
+      </div>
+      <button onClick={()=>setOpen("mes")} style={btn}>Visualizar e imprimir</button>
+    </div>
+    <div style={card}>
+      <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",gap:8,flexWrap:"wrap",marginBottom:10}}>
+        <div style={{fontSize:12,fontWeight:600,color:Z.ac}}>Inconsistências</div>
+        <span style={{fontSize:11,color:Z.tx2}}><span style={{color:nErr?Z.rd:Z.gn,fontWeight:600}}>{nErr} erro{nErr!==1?"s":""}</span> · <span style={{color:nAt?Z.yl:Z.gn,fontWeight:600}}>{nAt} atenção</span></span>
+      </div>
+      <div style={{fontSize:10,color:Z.tx3,marginBottom:10}}>Verificação automática dos dados: parcelas × meses, soma × total, sequência de meses, datas e valores inválidos, baixas fora do período ou repetidas e nomes de loja parecidos.</div>
+      {inc.map((i,k)=>(<div key={k} style={{padding:"8px 0",borderTop:`1px solid ${Z.bd}`,fontSize:11}}>
+        <div style={{display:"flex",gap:6,alignItems:"center",flexWrap:"wrap"}}><span style={{fontSize:9,fontWeight:700,padding:"1px 6px",borderRadius:4,background:i.sev==="Erro"?`${Z.rd}25`:`${Z.yl}25`,color:i.sev==="Erro"?Z.rd:Z.yl}}>{i.sev}</span><span style={{color:Z.tx2}}>{i.cat}</span></div>
+        <div style={{marginTop:3,color:Z.tx,fontWeight:500}}>{i.title}</div><div style={{color:Z.tx2,marginTop:1}}>{i.detail}</div>
+      </div>))}
+      {!inc.length&&<div style={{fontSize:11,color:Z.gn}}>Nenhuma inconsistência encontrada.</div>}
+      <button onClick={()=>setOpen("inc")} style={{...btn,marginTop:12}}>Visualizar e imprimir</button>
+    </div>
+    {open==="mes"&&<PrintShell onClose={()=>setOpen(null)}><MonthSheet sm={m} {...{ps,baixas,mt}} showL={tipo!=="bx"} showB={tipo!=="lanc"}/></PrintShell>}
+    {open==="inc"&&<PrintShell onClose={()=>setOpen(null)}><IncSheet items={inc}/></PrintShell>}
+  </div>);
 }
 
 function Hist({history}){
@@ -412,7 +512,7 @@ function App(){
     </header>
 
     <nav style={{display:"flex",gap:1,padding:"0 18px",background:Z.cd,borderBottom:`1px solid ${Z.bd}`,overflowX:"auto",WebkitOverflowScrolling:"touch"}}>
-      {[["dashboard","Dashboard"],["purchases","Compras"],["baixas","Baixas"],/*["people","Terceiros"],*/["reports","Relatórios"],["history","Histórico"]].map(([id,lb])=>(<button key={id} onClick={()=>setTab(id)} style={{background:tab===id?Z.cd2:"transparent",color:tab===id?Z.ac:Z.tx2,border:"none",borderBottom:tab===id?`2px solid ${Z.ac2}`:"2px solid transparent",padding:"10px 13px",fontSize:11,fontWeight:500,cursor:"pointer"}}>{lb}</button>))}
+      {[["dashboard","Dashboard"],["purchases","Compras"],["baixas","Baixas"],/*["people","Terceiros"],*/["reports","Gráficos"],["relatorios","Relatórios"],["history","Histórico"]].map(([id,lb])=>(<button key={id} onClick={()=>setTab(id)} style={{background:tab===id?Z.cd2:"transparent",color:tab===id?Z.ac:Z.tx2,border:"none",borderBottom:tab===id?`2px solid ${Z.ac2}`:"2px solid transparent",padding:"10px 13px",fontSize:11,fontWeight:500,cursor:"pointer"}}>{lb}</button>))}
     </nav>
 
     <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",padding:"6px 18px",background:Z.bg,borderBottom:`1px solid ${Z.bd}`,fontSize:10,color:Z.tx3,flexWrap:"wrap",gap:4}}>
@@ -426,6 +526,7 @@ function App(){
       {tab==="baixas"&&<BaixasView {...{baixas,setBaixas,mt,am,isAdmin}}/>}
       {/*tab==="people"&&<Ppl ppl={ppl} setPpl={setPpl} isAdmin={isAdmin}/>*/}
       {tab==="reports"&&<Rpts {...{ps,mt,am}}/>}
+      {tab==="relatorios"&&<Relat {...{ps,baixas,mt,am}}/>}
       {tab==="history"&&<Hist history={history}/>}
     </main>
 
@@ -570,7 +671,7 @@ function Dash({mt,sm,setSm,cmp,td,ap,am,ps,baixas,setBaixas,isAdmin}){
           </div>
         </>):(<>
           <div style={{fontSize:11,fontWeight:600,color:Z.ac,marginBottom:12}}>Parcelas do Mês</div>
-          <div style={{maxHeight:220,overflowY:"auto"}}>{[...cmp].sort((a,b)=>dKey(b)-dKey(a)).map(p=>(<div key={p.id} style={{display:"grid",gridTemplateColumns:"1fr auto auto",alignItems:"center",gap:10,padding:"5px 0",borderBottom:`1px solid ${Z.bd}`,fontSize:11}}><div style={{minWidth:0,overflow:"hidden",textOverflow:"ellipsis",whiteSpace:"nowrap"}}><span>{p.loja}</span><span style={{color:Z.tx3,marginLeft:5,fontSize:9}}>{p.parcelas}x</span></div><span style={{fontFamily:Z.mn,fontSize:10,color:Z.tx2}}>{fD(p.data)}</span><span style={{fontFamily:Z.mn,color:Z.ac,textAlign:"right"}}>{fB(p.monthly[sm])}</span></div>))}</div>
+          <div>{[...cmp].sort((a,b)=>dKey(b)-dKey(a)).map(p=>(<div key={p.id} style={{display:"grid",gridTemplateColumns:"1fr auto auto",alignItems:"center",gap:10,padding:"5px 0",borderBottom:`1px solid ${Z.bd}`,fontSize:11}}><div style={{minWidth:0,overflow:"hidden",textOverflow:"ellipsis",whiteSpace:"nowrap"}}><span>{p.loja}</span><span style={{color:Z.tx3,marginLeft:5,fontSize:9}}>{p.parcelas}x</span></div><span style={{fontFamily:Z.mn,fontSize:10,color:Z.tx2}}>{fD(p.data)}</span><span style={{fontFamily:Z.mn,color:Z.ac,textAlign:"right"}}>{fB(p.monthly[sm])}</span></div>))}</div>
         </>)}
       </div>
     </div>
