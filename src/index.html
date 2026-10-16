@@ -84,6 +84,7 @@ async function loginGoogle(){
 async function logout(){const auth=getAuth();if(auth)await auth.signOut();}
 function getUserRole(email){return ROLES[email]||null;}
 // Homologação (/homolog/) grava em documento separado, sem tocar a produção
+const APP_VERSION="__VERSION__";
 const IS_HML=location.pathname.includes("/homolog/");
 const DOC_PATH=IS_HML?"data/homolog":"data/main";
 // Repara compras cujas parcelas foram cortadas pelo antigo limite fixo do calendário (Dezembro/2026)
@@ -594,7 +595,7 @@ function App(){
     </nav>
 
     <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",padding:"6px 18px",background:Z.bg,borderBottom:`1px solid ${Z.bd}`,fontSize:10,color:Z.tx3,flexWrap:"wrap",gap:4}}>
-      <span>Fechamento da fatura: <span style={{color:Z.yl,fontWeight:600}}>dia 19 de cada mês</span></span>
+      <span>Fechamento da fatura: <span style={{color:Z.yl,fontWeight:600}}>dia 19 de cada mês</span> <span style={{marginLeft:6,opacity:.7}}>· versão {APP_VERSION}</span></span>
       <span>Última atualização: <span style={{color:Z.ac,fontFamily:Z.mn}}>{lastUpdate?new Date(lastUpdate).toLocaleString("pt-BR",{day:"2-digit",month:"2-digit",year:"numeric",hour:"2-digit",minute:"2-digit"}):"—"}</span></span>
     </div>
 
