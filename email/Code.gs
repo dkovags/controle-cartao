@@ -7,8 +7,10 @@
  * (compras em vermelho, baixas em verde). Cada usuário tem a sua janela independente.
  * Instalação em email/LEIA-ME.md.
  */
-// Quem recebe os resumos. Para incluir outros usuários, acrescente os e-mails e reimplante.
-const DESTINATARIOS = ['kovags@gmail.com'];   // em princípio, só o administrador
+// Quem recebe os resumos: usuários ativos marcados com "Recebe e-mail" no menu Usuários do CPC
+// (cadastro da produção). DESTINATARIOS só é usado se a leitura do cadastro falhar.
+const PROJETO = 'cartao-491a2';
+const DESTINATARIOS = ['kovags@gmail.com'];
 const TOKEN = 'cpc-7f3a9c2e';                  // deve ser igual a EMAIL_TOKEN no app
 const JANELA_HORAS = 8;
 const PREFIXO = 'op_';                         // itens da fila em Propriedades do script
@@ -61,7 +63,7 @@ function enviarJanelas(todas, uidDisparado) {
       const itens = chaves.map(k => JSON.parse(all[k]));
       if (itens.length) {
         const n = itens.reduce((s, i) => s + i.ops.length, 0);
-        MailApp.sendEmail({ to: DESTINATARIOS.join(','), subject: `CPC: ${n} ${n > 1 ? 'operações' : 'operação'} de ${jan.usuario} (${fmt(jan.inicio)} a ${fmt(new Date())})`, htmlBody: montarHtml(itens, jan.inicio, jan.usuario), name: 'CPC – Controle de Pagamentos' });
+        MailApp.sendEmail({ to: destinatarios().join(','), subject: `CPC: ${n} ${n > 1 ? 'operações' : 'operação'} de ${jan.usuario} (${fmt(jan.inicio)} a ${fmt(new Date())})`, htmlBody: montarHtml(itens, jan.inicio, jan.usuario), name: 'CPC – Controle de Pagamentos' });
       }
       chaves.forEach(k => props.deleteProperty(k));   // só limpa depois de enviar
       props.deleteProperty(kj);
@@ -111,6 +113,19 @@ function montarHtml(itens, inicio, usuario) {
 
 const fmt = d => Utilities.formatDate(new Date(d || Date.now()), 'America/Sao_Paulo', 'dd/MM/yyyy HH:mm');
 function resposta(t) { return ContentService.createTextOutput(t); }
+
+// Lê o cadastro de usuários no Firestore com a conta dona do script (dona do projeto Firebase)
+function destinatarios() {
+  try {
+    const url = `https://firestore.googleapis.com/v1/projects/${PROJETO}/databases/(default)/documents/data/main/usuarios?pageSize=300`;
+    const r = UrlFetchApp.fetch(url, { headers: { Authorization: 'Bearer ' + ScriptApp.getOAuthToken() }, muteHttpExceptions: true });
+    if (r.getResponseCode() !== 200) throw new Error(r.getContentText());
+    const docs = JSON.parse(r.getContentText()).documents || [];
+    const lista = docs.filter(d => d.fields && d.fields.ativo && d.fields.ativo.booleanValue && d.fields.recebeEmail && d.fields.recebeEmail.booleanValue)
+      .map(d => decodeURIComponent(d.name.split('/').pop()));
+    return lista.length ? lista : DESTINATARIOS;
+  } catch (err) { console.warn('Usando DESTINATARIOS: ' + err); return DESTINATARIOS; }
+}
 
 /** Rode uma vez pelo editor para autorizar (e-mail e gatilhos) e receber um resumo de exemplo. */
 function testarEnvio() {

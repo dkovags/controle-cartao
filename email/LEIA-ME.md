@@ -19,5 +19,11 @@ altere `JANELA_HORAS`.
 5. Copie a **URL do app da Web** (termina em `/exec`) e envie para configurar no CPC
    (constante `EMAIL_HOOK` em `src/index.html`).
 
-Para que outros usuários também recebam os resumos, acrescente os e-mails em
-`DESTINATARIOS` no script e reimplante (Implantar → Gerenciar implantações → editar → Nova versão).
+**Quem recebe:** os usuários ativos marcados com "Recebe e-mail" no menu **Usuários** do CPC
+(cadastro da produção). Não é preciso mexer no script para incluir ou tirar destinatários.
+O script lê esse cadastro com a sua conta (dona do projeto Firebase); `DESTINATARIOS` só é
+usado se a leitura falhar.
+
+Copie também o arquivo `appsscript.json` (no editor: Configurações do projeto → marque
+"Mostrar arquivo de manifesto appsscript.json" e substitua o conteúdo), que declara as
+permissões de e-mail, gatilhos e leitura do Firestore.

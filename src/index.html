@@ -64,7 +64,7 @@ const SEED_BX={"Junho/2023":[{"amount":2000,"date":"25/05/2023"},{"amount":3000,
 const SEED_ACUM={"Agosto/2023":0,"Setembro/2023":0,"Outubro/2023":0,"Novembro/2023":0,"Dezembro/2023":0,"Janeiro/2024":0,"Fevereiro/2024":0,"Março/2024":1073.54,"Abril/2024":-0.04,"Maio/2024":-0.04,"Junho/2024":1335.16,"Julho/2024":1506.61,"Agosto/2024":490.01,"Setembro/2024":1335.16,"Outubro/2024":0,"Novembro/2024":0,"Dezembro/2024":0,"Janeiro/2025":0,"Fevereiro/2025":33.18,"Março/2025":0.01,"Abril/2025":0,"Maio/2025":0.01,"Junho/2025":0.01,"Julho/2025":0.02,"Agosto/2025":255.74,"Setembro/2025":311.47,"Outubro/2025":83.67,"Novembro/2025":5.05,"Dezembro/2025":0.01,"Janeiro/2026":0.60,"Fevereiro/2026":0.57};
 // ─── FIREBASE CONFIG ─────────────────────────────
 const FB_CFG={apiKey:"AIzaSyDjoF7vPKRgXtNhhDyky5GQvfp76vgB99c",authDomain:"cartao-491a2.firebaseapp.com",projectId:"cartao-491a2",storageBucket:"cartao-491a2.firebasestorage.app",messagingSenderId:"967186616580",appId:"1:967186616580:web:27e525936cb5d0d92c4051"};
-// Perfis: admin (tudo), editor (inclui/altera/exclui; sem backup, exportar e inconsistências), viewer (só consulta)
+// Configuração inicial de acesso: só é usada para criar o cadastro (menu Usuários) no 1º acesso do administrador
 const ROLES={"kovags@gmail.com":"admin","kelianeserra@gmail.com":"editor"};
 let db=null;let fbApp=null;
 function initFB(){
@@ -521,6 +521,106 @@ function Incons({ps,baixas,incOk,setIncOk,user}){
   </div>);
 }
 
+// ─── USUÁRIOS E PERFIS (cadastro em data/{amb}/usuarios/{email} e data/{amb}/perfis/{id}) ───
+// Administrador de reserva: sempre tem acesso total, mesmo se o cadastro for apagado
+const ADMIN_FIXO="kovags@gmail.com";
+const PERMS=[["editar","Incluir, alterar e excluir"],["backup","Backup"],["exportar","Exportar"],["inconsistencias","Inconsistências"],["usuarios","Gerir usuários"]];
+const allPerms=v=>Object.fromEntries(PERMS.map(([k])=>[k,v]));
+const PERFIS_PADRAO={admin:{nome:"Administrador",...allPerms(true)},editor:{nome:"Edição",...allPerms(false),editar:true},viewer:{nome:"Consulta",...allPerms(false)}};
+const NOMES_PADRAO={"kovags@gmail.com":"Diego Kovags","kelianeserra@gmail.com":"Keliane"};
+// Descobre o perfil de quem entrou; no 1º acesso do admin, cria o cadastro a partir da configuração anterior (ROLES)
+async function resolveAccess(email){
+  const fdb=initFB();const B=DOC_PATH;const now=new Date().toISOString();
+  const semeado=(await fdb.doc(`${B}/perfis/admin`).get()).exists;
+  if(email===ADMIN_FIXO){
+    if(!semeado){
+      for(const[id,p]of Object.entries(PERFIS_PADRAO))await fdb.doc(`${B}/perfis/${id}`).set(p);
+      for(const[e,r]of Object.entries(ROLES))await fdb.doc(`${B}/usuarios/${e}`).set({nome:NOMES_PADRAO[e]||e,perfil:r,ativo:true,recebeEmail:e===ADMIN_FIXO,criadoEm:now,criadoPor:email});
+    }
+    return{perfil:"admin",perfilNome:"Administrador",perms:allPerms(true)};
+  }
+  if(!semeado){const r=ROLES[email];return r?{perfil:r,perfilNome:PERFIS_PADRAO[r].nome,perms:PERFIS_PADRAO[r]}:null;}
+  const u=await fdb.doc(`${B}/usuarios/${email}`).get();if(!u.exists||!u.data().ativo)return null;
+  const p=await fdb.doc(`${B}/perfis/${u.data().perfil}`).get();if(!p.exists)return null;
+  return{perfil:u.data().perfil,perfilNome:p.data().nome,perms:p.data()};
+}
+// Registra no histórico alterações de cadastro (sem mexer nos dados financeiros)
+async function logAdmin(changes,who){
+  const fdb=initFB();if(!fdb||!changes.length)return;const ref=fdb.doc(DOC_PATH);
+  await fdb.runTransaction(async t=>{const s=await t.get(ref);const d=s.data()||{};const h=pJ(d.history)||[];h.push({ts:new Date().toISOString(),user:who,changes});while(h.length>500)h.shift();t.set(ref,{...d,history:JSON.stringify(h),rev:(d.rev||0)+1});});
+}
+function useCollection(path){
+  const[list,setList]=useState(null);
+  useEffect(()=>{const fdb=initFB();if(!fdb){setList([]);return;}return fdb.collection(path).onSnapshot(s=>setList(s.docs.map(d=>({id:d.id,...d.data()}))),()=>setList([]));},[path]);
+  return list;
+}
+function Usuarios({user}){
+  const us=useCollection(`${DOC_PATH}/usuarios`);const pf=useCollection(`${DOC_PATH}/perfis`);
+  const[edit,setEdit]=useState({});const[novo,setNovo]=useState({email:"",nome:"",perfil:"editor",ativo:true,recebeEmail:false});const[np,setNp]=useState("");const[err,setErr]=useState("");const[busy,setBusy]=useState(false);
+  const fdb=initFB();const me=user?.email;
+  const card={background:Z.cd,border:`1px solid ${Z.bd}`,borderRadius:10,padding:16,marginBottom:18};
+  const inp={background:Z.cd2,color:Z.tx,border:`1px solid ${Z.bd}`,borderRadius:6,padding:"6px 8px",fontSize:11,fontFamily:Z.ft,minWidth:0};
+  const btn={background:`linear-gradient(135deg,${Z.ac3},${Z.ac2})`,color:"#fff",border:"none",borderRadius:6,padding:"6px 12px",fontSize:11,fontWeight:600,cursor:"pointer",fontFamily:Z.ft};
+  const th={textAlign:"left",padding:"6px 6px",color:Z.tx3,fontWeight:600,fontSize:10,whiteSpace:"nowrap"};const td={padding:"6px 6px",borderTop:`1px solid ${Z.bd}`,fontSize:11,verticalAlign:"middle"};
+  if(!us||!pf)return<div style={card}><div style={{fontSize:11,color:Z.tx2}}>Carregando…</div></div>;
+  const pNome=id=>(pf.find(p=>p.id===id)||{}).nome||id;
+  const run=async(fn,changes)=>{setErr("");setBusy(true);try{await fn();await logAdmin(changes,me);}catch(e){setErr(String(e.message||e));}setBusy(false);};
+  const salvarU=u=>{const e=edit[u.id];const ch=[];if(e.nome!==u.nome)ch.push(`nome: ${u.nome} → ${e.nome}`);if(e.perfil!==u.perfil)ch.push(`perfil: ${pNome(u.perfil)} → ${pNome(e.perfil)}`);if(e.ativo!==u.ativo)ch.push(e.ativo?"reativado":"desativado");if(e.recebeEmail!==u.recebeEmail)ch.push(e.recebeEmail?"passa a receber e-mail":"deixa de receber e-mail");
+    return run(async()=>{await fdb.doc(`${DOC_PATH}/usuarios/${u.id}`).set({...u,...e,id:undefined,alteradoEm:new Date().toISOString(),alteradoPor:me},{merge:true});setEdit(x=>{const n={...x};delete n[u.id];return n;});},[`Usuário ${u.id} alterado: ${ch.join("; ")}`]);};
+  const incluir=()=>{const email=novo.email.trim().toLowerCase();if(!/^[^@\s]+@[^@\s]+\.[^@\s]+$/.test(email))return setErr("Informe um e-mail válido.");if(us.some(u=>u.id===email))return setErr("Esse e-mail já está cadastrado.");
+    return run(async()=>{await fdb.doc(`${DOC_PATH}/usuarios/${email}`).set({nome:novo.nome.trim()||email,perfil:novo.perfil,ativo:novo.ativo,recebeEmail:novo.recebeEmail,criadoEm:new Date().toISOString(),criadoPor:me});setNovo({email:"",nome:"",perfil:"editor",ativo:true,recebeEmail:false});},[`Usuário incluído: ${email} (${pNome(novo.perfil)})`]);};
+  const excluirU=u=>{if(!confirm(`Excluir o acesso de ${u.id}?`))return;run(()=>fdb.doc(`${DOC_PATH}/usuarios/${u.id}`).delete(),[`Usuário excluído: ${u.id} (${pNome(u.perfil)})`]);};
+  const togglePerm=(p,k)=>{const v=!p[k];run(()=>fdb.doc(`${DOC_PATH}/perfis/${p.id}`).set({[k]:v},{merge:true}),[`Perfil ${p.nome}: ${v?"pode":"não pode mais"} ${PERMS.find(x=>x[0]===k)[1].toLowerCase()}`]);};
+  const incluirP=()=>{const nome=np.trim();const id=nome.normalize("NFD").replace(/[̀-ͯ]/g,"").toLowerCase().replace(/[^a-z0-9]+/g,"-").replace(/^-|-$/g,"");if(!id)return setErr("Informe o nome do perfil.");if(pf.some(p=>p.id===id))return setErr("Já existe um perfil com esse nome.");
+    return run(async()=>{await fdb.doc(`${DOC_PATH}/perfis/${id}`).set({nome,...allPerms(false)});setNp("");},[`Perfil incluído: ${nome}`]);};
+  const excluirP=p=>{if(us.some(u=>u.perfil===p.id))return setErr(`O perfil ${p.nome} está em uso.`);if(!confirm(`Excluir o perfil ${p.nome}?`))return;run(()=>fdb.doc(`${DOC_PATH}/perfis/${p.id}`).delete(),[`Perfil excluído: ${p.nome}`]);};
+  const pfOrd=[...pf].sort((a,b)=>(a.id==="admin"?-1:b.id==="admin"?1:a.nome.localeCompare(b.nome)));
+  const usOrd=[...us].sort((a,b)=>(a.nome||a.id).localeCompare(b.nome||b.id));
+  return(<div>
+    {err&&<div style={{...card,borderColor:Z.rd,color:Z.rd,fontSize:11,padding:10}}>{err}</div>}
+    <div style={card}>
+      <div style={{fontSize:12,fontWeight:600,color:Z.ac,marginBottom:4}}>Usuários</div>
+      <div style={{fontSize:10,color:Z.tx3,marginBottom:10}}>O acesso é pela conta Google do e-mail cadastrado. Usuário inativo ou não cadastrado não entra. Você não pode alterar o seu próprio perfil nem se desativar.</div>
+      <div style={{overflowX:"auto"}}><table style={{width:"100%",borderCollapse:"collapse",minWidth:560}}>
+        <thead><tr><th style={th}>E-mail</th><th style={th}>Nome</th><th style={th}>Perfil</th><th style={th}>Ativo</th><th style={th}>Recebe e-mail</th><th style={th}></th></tr></thead>
+        <tbody>{usOrd.map(u=>{const e=edit[u.id]||{nome:u.nome,perfil:u.perfil,ativo:u.ativo,recebeEmail:!!u.recebeEmail};const set=k=>v=>setEdit(x=>({...x,[u.id]:{...e,[k]:v}}));const self=u.id===me||u.id===ADMIN_FIXO;const dirty=!!edit[u.id];
+          return(<tr key={u.id} style={{opacity:u.ativo?1:.55}}>
+            <td style={{...td,fontFamily:Z.mn,fontSize:10}}>{u.id}{u.id===ADMIN_FIXO&&<span title="Administrador de reserva" style={{marginLeft:4}}>🔒</span>}</td>
+            <td style={td}><input value={e.nome} onChange={x=>set("nome")(x.target.value)} style={{...inp,width:"100%"}}/></td>
+            <td style={td}><select value={e.perfil} disabled={self} onChange={x=>set("perfil")(x.target.value)} style={inp}>{pfOrd.map(p=><option key={p.id} value={p.id}>{p.nome}</option>)}</select></td>
+            <td style={{...td,textAlign:"center"}}><input type="checkbox" checked={e.ativo} disabled={self} onChange={x=>set("ativo")(x.target.checked)} style={{accentColor:Z.gn,width:15,height:15}}/></td>
+            <td style={{...td,textAlign:"center"}}><input type="checkbox" checked={e.recebeEmail} onChange={x=>set("recebeEmail")(x.target.checked)} style={{accentColor:Z.ac2,width:15,height:15}}/></td>
+            <td style={{...td,whiteSpace:"nowrap",textAlign:"right"}}>{dirty&&<><button disabled={busy} onClick={()=>salvarU(u)} style={btn}>Salvar</button> <button onClick={()=>setEdit(x=>{const n={...x};delete n[u.id];return n;})} style={{...btn,background:Z.bd,color:Z.tx2}}>✕</button></>}{!dirty&&!self&&<button disabled={busy} onClick={()=>excluirU(u)} style={{background:"none",border:"none",color:Z.rd,cursor:"pointer",fontSize:11}}>Excluir</button>}</td>
+          </tr>);})}</tbody>
+      </table></div>
+      <div style={{display:"flex",gap:6,flexWrap:"wrap",alignItems:"center",marginTop:12,paddingTop:12,borderTop:`1px solid ${Z.bd}`}}>
+        <input placeholder="e-mail (conta Google)" value={novo.email} onChange={e=>setNovo({...novo,email:e.target.value})} style={{...inp,flex:"2 1 180px"}}/>
+        <input placeholder="Nome" value={novo.nome} onChange={e=>setNovo({...novo,nome:e.target.value})} style={{...inp,flex:"1 1 110px"}}/>
+        <select value={novo.perfil} onChange={e=>setNovo({...novo,perfil:e.target.value})} style={inp}>{pfOrd.map(p=><option key={p.id} value={p.id}>{p.nome}</option>)}</select>
+        <label style={{fontSize:11,color:Z.tx2,display:"flex",gap:4,alignItems:"center"}}><input type="checkbox" checked={novo.recebeEmail} onChange={e=>setNovo({...novo,recebeEmail:e.target.checked})} style={{accentColor:Z.ac2}}/>recebe e-mail</label>
+        <button disabled={busy} onClick={incluir} style={btn}>+ Incluir usuário</button>
+      </div>
+    </div>
+    <div style={card}>
+      <div style={{fontSize:12,fontWeight:600,color:Z.ac,marginBottom:4}}>Perfis</div>
+      <div style={{fontSize:10,color:Z.tx3,marginBottom:10}}>Marque o que cada perfil pode fazer. Consultar os dados é permitido a todos os perfis. O perfil Administrador tem sempre todas as permissões.</div>
+      <div style={{overflowX:"auto"}}><table style={{width:"100%",borderCollapse:"collapse",minWidth:560}}>
+        <thead><tr><th style={th}>Perfil</th>{PERMS.map(([k,l])=><th key={k} style={{...th,textAlign:"center",whiteSpace:"normal"}}>{l}</th>)}<th style={th}>Usuários</th><th style={th}></th></tr></thead>
+        <tbody>{pfOrd.map(p=>{const n=us.filter(u=>u.perfil===p.id).length;return(<tr key={p.id}>
+          <td style={{...td,fontWeight:600}}>{p.nome}</td>
+          {PERMS.map(([k])=><td key={k} style={{...td,textAlign:"center"}}><input type="checkbox" checked={!!p[k]} disabled={busy||p.id==="admin"} onChange={()=>togglePerm(p,k)} style={{accentColor:Z.ac2,width:15,height:15}}/></td>)}
+          <td style={{...td,textAlign:"center",color:Z.tx2}}>{n}</td>
+          <td style={{...td,textAlign:"right"}}>{p.id!=="admin"&&n===0&&<button disabled={busy} onClick={()=>excluirP(p)} style={{background:"none",border:"none",color:Z.rd,cursor:"pointer",fontSize:11}}>Excluir</button>}</td>
+        </tr>);})}</tbody>
+      </table></div>
+      <div style={{display:"flex",gap:6,marginTop:12,paddingTop:12,borderTop:`1px solid ${Z.bd}`}}>
+        <input placeholder="Nome do novo perfil" value={np} onChange={e=>setNp(e.target.value)} style={{...inp,flex:1}}/>
+        <button disabled={busy} onClick={incluirP} style={btn}>+ Incluir perfil</button>
+      </div>
+    </div>
+  </div>);
+}
+
 function Hist({history}){
   const[n,setN]=useState(50);const list=[...history].reverse();
   const fmt=t=>new Date(t).toLocaleString("pt-BR",{day:"2-digit",month:"2-digit",year:"numeric",hour:"2-digit",minute:"2-digit"});
@@ -536,12 +636,12 @@ function Hist({history}){
 }
 
 function App(){
-  const[user,setUser]=useState(null);const[role,setRole]=useState(null);const[authLoading,setAuthLoading]=useState(true);const[authError,setAuthError]=useState(null);
+  const[user,setUser]=useState(null);const[role,setRole]=useState(null);const[authLoading,setAuthLoading]=useState(true);const[authError,setAuthError]=useState(null);const[access,setAccess]=useState(null);
   const[ps,setPs]=useState([]);const[ppl,setPpl]=useState({});const[baixas,setBaixas]=useState({});const[ok,setOk]=useState(false);const[saving,setSaving]=useState(false);const[lastUpdate,setLastUpdate]=useState(null);const[loadErr,setLoadErr]=useState(null);const[history,setHistory]=useState([]);const[incOk,setIncOk]=useState({});
   const[tab,setTab]=useState("dashboard");const[sm,setSm]=useState(cmk());const[sf,setSf]=useState(false);const[ep,setEp]=useState(null);const[sr,setSr]=useState("");const[toast,setToast]=useState(null);
   CUR_EMAIL=user?.email||"";
   const lojasList=useMemo(()=>[...new Set(ps.map(p=>p.loja))],[ps]);
-  const isAdmin=role==="admin";const canEdit=isAdmin||role==="editor";
+  const P=access?.perms||{};const isAdmin=access?.perfil==="admin";const canEdit=!!P.editar;
 
   // Listen to auth state
   useEffect(()=>{
@@ -550,14 +650,14 @@ function App(){
     if(!auth){
       // Firebase indisponível (dentro do Claude) — bypass auth, modo admin
       setUser({displayName:"Local",email:"local",photoURL:null});
-      setRole("admin");setAuthLoading(false);return;
+      setAccess({perfil:"admin",perfilNome:"Administrador",perms:allPerms(true)});setRole("admin");setAuthLoading(false);return;
     }
-    const unsub=auth.onAuthStateChanged(u=>{
+    const unsub=auth.onAuthStateChanged(async u=>{
       if(u){
-        const r=getUserRole(u.email);
-        if(r){setUser(u);setRole(r);setAuthError(null);}
-        else{setAuthError("Acesso não autorizado para "+u.email);auth.signOut();setUser(null);setRole(null);}
-      }else{setUser(null);setRole(null);}
+        let a=null;try{a=await resolveAccess(u.email);}catch(e){setAuthError("Não foi possível verificar o acesso: "+(e.code||e.message||e));auth.signOut();setUser(null);setRole(null);setAuthLoading(false);return;}
+        if(a){setAccess(a);setUser(u);setRole(a.perfil);setAuthError(null);}
+        else{setAuthError("Acesso não autorizado para "+u.email);auth.signOut();setUser(null);setRole(null);setAccess(null);}
+      }else{setUser(null);setRole(null);setAccess(null);}
       setAuthLoading(false);
     });
     return()=>unsub();
@@ -674,17 +774,17 @@ function App(){
         <div style={{display:"flex",alignItems:"center",gap:5}}>
           {user.photoURL&&<img src={user.photoURL} style={{width:24,height:24,borderRadius:"50%"}} referrerPolicy="no-referrer"/>}
           <span style={{fontSize:10,color:Z.tx2}}>{user.displayName||user.email}</span>
-          <span style={{fontSize:8,padding:"2px 6px",borderRadius:4,background:isAdmin?`${Z.ac3}30`:canEdit?`${Z.yl}30`:`${Z.gn}30`,color:isAdmin?Z.ac:canEdit?Z.yl:Z.gn,fontWeight:600}}>{isAdmin?"Admin":canEdit?"Edição":"Consulta"}</span>
+          <span style={{fontSize:8,padding:"2px 6px",borderRadius:4,background:isAdmin?`${Z.ac3}30`:canEdit?`${Z.yl}30`:`${Z.gn}30`,color:isAdmin?Z.ac:canEdit?Z.yl:Z.gn,fontWeight:600}}>{access?.perfilNome||"—"}</span>
         </div>
-        {isAdmin&&<button onClick={()=>downloadBackup({purchases:ps,people:ppl,baixas,updatedAt:lastUpdate,history})} title="Baixa um arquivo JSON com todos os dados" style={{background:Z.cd2,color:Z.tx2,border:`1px solid ${Z.bd}`,borderRadius:6,padding:"6px 9px",fontSize:10,cursor:"pointer"}}>Backup</button>}
+        {P.backup&&<button onClick={()=>downloadBackup({purchases:ps,people:ppl,baixas,updatedAt:lastUpdate,history})} title="Baixa um arquivo JSON com todos os dados" style={{background:Z.cd2,color:Z.tx2,border:`1px solid ${Z.bd}`,borderRadius:6,padding:"6px 9px",fontSize:10,cursor:"pointer"}}>Backup</button>}
         {canEdit&&<button onClick={()=>setSf(true)} style={{background:`linear-gradient(135deg,${Z.ac3},${Z.ac2})`,color:"#fff",border:"none",borderRadius:6,padding:"6px 12px",fontSize:11,fontWeight:600,cursor:"pointer",display:"flex",alignItems:"center",gap:4}}>+ Nova Compra</button>}
-        {isAdmin&&<button onClick={()=>exportXLSX(ps,baixas,ppl,mt)} style={{background:Z.cd2,color:Z.tx2,border:`1px solid ${Z.bd}`,borderRadius:6,padding:"6px 9px",fontSize:10,cursor:"pointer"}}>Exportar</button>}
+        {P.exportar&&<button onClick={()=>exportXLSX(ps,baixas,ppl,mt)} style={{background:Z.cd2,color:Z.tx2,border:`1px solid ${Z.bd}`,borderRadius:6,padding:"6px 9px",fontSize:10,cursor:"pointer"}}>Exportar</button>}
         <button onClick={handleLogout} style={{background:Z.cd2,color:Z.tx3,border:`1px solid ${Z.bd}`,borderRadius:6,padding:"6px 9px",fontSize:10,cursor:"pointer"}}>Sair</button>
       </div>
     </header>
 
     <nav style={{display:"flex",gap:1,padding:"0 18px",background:Z.cd,borderBottom:`1px solid ${Z.bd}`,overflowX:"auto",WebkitOverflowScrolling:"touch"}}>
-      {[["dashboard","Dashboard"],["purchases","Compras"],["baixas","Baixas"],/*["people","Terceiros"],*/["reports","Gráficos"],["relatorios","Relatórios"],...(isAdmin?[["incons","Inconsistências"]]:[]),["history","Histórico"]].map(([id,lb])=>(<button key={id} onClick={()=>setTab(id)} style={{background:tab===id?Z.cd2:"transparent",color:tab===id?Z.ac:Z.tx2,border:"none",borderBottom:tab===id?`2px solid ${Z.ac2}`:"2px solid transparent",padding:"10px 13px",fontSize:11,fontWeight:500,cursor:"pointer"}}>{lb}</button>))}
+      {[["dashboard","Dashboard"],["purchases","Compras"],["baixas","Baixas"],/*["people","Terceiros"],*/["reports","Gráficos"],["relatorios","Relatórios"],...(P.inconsistencias?[["incons","Inconsistências"]]:[]),["history","Histórico"],...(P.usuarios?[["usuarios","Usuários"]]:[])].map(([id,lb])=>(<button key={id} onClick={()=>setTab(id)} style={{background:tab===id?Z.cd2:"transparent",color:tab===id?Z.ac:Z.tx2,border:"none",borderBottom:tab===id?`2px solid ${Z.ac2}`:"2px solid transparent",padding:"10px 13px",fontSize:11,fontWeight:500,cursor:"pointer"}}>{lb}</button>))}
     </nav>
 
     <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",padding:"6px 18px",background:Z.bg,borderBottom:`1px solid ${Z.bd}`,fontSize:10,color:Z.tx3,flexWrap:"wrap",gap:4}}>
@@ -698,9 +798,10 @@ function App(){
       {tab==="baixas"&&<BaixasView {...{baixas,setBaixas,mt,am}} isAdmin={canEdit}/>}
       {/*tab==="people"&&<Ppl ppl={ppl} setPpl={setPpl} isAdmin={isAdmin}/>*/}
       {tab==="reports"&&<Rpts {...{ps,mt,am}}/>}
-      {tab==="relatorios"&&<Relat {...{ps,baixas,mt,am,incOk,isAdmin}}/>}
-      {tab==="incons"&&isAdmin&&<Incons {...{ps,baixas,incOk,setIncOk,user}}/>}
+      {tab==="relatorios"&&<Relat {...{ps,baixas,mt,am,incOk}} isAdmin={!!P.inconsistencias}/>}
+      {tab==="incons"&&P.inconsistencias&&<Incons {...{ps,baixas,incOk,setIncOk,user}}/>}
       {tab==="history"&&<Hist history={history}/>}
+      {tab==="usuarios"&&P.usuarios&&<Usuarios user={user}/>}
     </main>
 
     {sf&&<Frm lojas={lojasList} user={user} onClose={()=>setSf(false)} onSave={p=>{setPs(v=>[...v,{...p,id:Date.now()}]);setSf(false);tt("Compra cadastrada!");}}/>}

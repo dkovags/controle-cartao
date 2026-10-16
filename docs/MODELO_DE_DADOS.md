@@ -19,6 +19,9 @@ erDiagram
     AMBIENTE ||--o{ ALTERACAO : "history"
     AMBIENTE ||--o{ TRATAMENTO : "incOk"
     AMBIENTE ||--o{ ANEXO : "subcoleção anexos"
+    AMBIENTE ||--o{ USUARIO : "subcoleção usuarios"
+    AMBIENTE ||--o{ PERFIL : "subcoleção perfis"
+    PERFIL ||--o{ USUARIO : "perfil"
     ANEXO ||--|{ PARTE : "subcoleção partes"
     COMPRA }o--o{ ANEXO : "anexos[]"
     BAIXA }o--o{ ANEXO : "anexos[]"
@@ -73,6 +76,24 @@ erDiagram
     }
     PARTE {
         string d "conteúdo em base64 (até 700.000 caracteres)"
+    }
+    USUARIO {
+        string id "e-mail da conta Google (minúsculas)"
+        string nome
+        string perfil "id do PERFIL"
+        bool ativo "inativo não entra"
+        bool recebeEmail "recebe o resumo das alterações"
+        string criadoEm "ISO 8601"
+        string criadoPor "e-mail"
+    }
+    PERFIL {
+        string id "admin, editor, viewer ou criado no app"
+        string nome "nome exibido"
+        bool editar "incluir, alterar e excluir"
+        bool backup
+        bool exportar
+        bool inconsistencias
+        bool usuarios "gerir usuários e perfis"
     }
 ```
 
@@ -142,15 +163,31 @@ As inconsistências em si não são gravadas: são recalculadas pelo app a parti
 - O arquivo é dividido em partes porque cada documento do Firestore aceita no máximo 1 MiB.
 - A compra ou baixa guarda os ids em `anexos`; ao excluir o registro, o anexo é mantido (auditoria).
 
-## Perfis de acesso
+## Usuários e perfis (subcoleções `usuarios` e `perfis`)
 
-Definidos em `ROLES` (`src/index.html`) e nas regras `firestore.rules`.
+Cada ambiente tem o seu cadastro, gerido no menu **Usuários** (só para quem tem a permissão
+"Gerir usuários"). Assim, testes na homologação não afetam o acesso à produção.
 
-| Perfil | Quem | Pode |
-|---|---|---|
-| `admin` | kovags@gmail.com | tudo, inclusive Backup, Exportar e Inconsistências |
-| `editor` | kelianeserra@gmail.com | consultar, incluir, alterar e excluir compras e baixas, anexar comprovantes |
-| `viewer` | (ninguém hoje) | apenas consultar |
+| Caminho | Conteúdo |
+|---|---|
+| `data/{amb}/usuarios/{email}` | **Usuário**: nome, perfil, ativo, recebe e-mail |
+| `data/{amb}/perfis/{id}` | **Perfil**: nome e permissões |
+
+Perfis iniciais:
+
+| id | Nome | Editar | Backup | Exportar | Inconsistências | Gerir usuários |
+|---|---|---|---|---|---|---|
+| `admin` | Administrador | ✓ | ✓ | ✓ | ✓ | ✓ |
+| `editor` | Edição | ✓ | — | — | — | — |
+| `viewer` | Consulta | — | — | — | — | — |
+
+- Consultar os dados é permitido a todo usuário ativo; as permissões acima são adicionais.
+- **Administrador de reserva:** `kovags@gmail.com` tem acesso total mesmo que o cadastro seja
+  apagado (fixo no código e nas regras). O próprio usuário não pode alterar o seu perfil nem se desativar.
+- No primeiro acesso do administrador a um ambiente, o app cria o cadastro inicial
+  (perfis acima e os usuários de `ROLES` em `src/index.html`). Até isso acontecer, vale `ROLES`.
+- As regras do Firestore (`firestore.rules`) consultam essas mesmas fichas para liberar leitura e gravação.
+- Alterações de cadastro entram no histórico do ambiente.
 
 ## Notificação por e-mail
 
@@ -158,7 +195,7 @@ A cada gravação com inclusão, alteração ou exclusão, o app envia as opera�
 Google Apps Script (`email/Code.gs`). O script guarda-as numa fila (Propriedades do script);
 a janela é **por usuário**: a primeira operação de cada usuário abre uma janela de 8 horas
 dele e, ao fim, um gatilho de tempo envia todas as operações desse usuário no período num
-único e-mail (com o nome de quem alterou) aos destinatários de `DESTINATARIOS`. Nada disso é gravado no
+único e-mail (com o nome de quem alterou) aos usuários ativos marcados com **recebe e-mail** no cadastro da produção. Nada disso é gravado no
 Firestore. Formato enviado pelo app:
 
 ```json
