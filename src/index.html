@@ -284,8 +284,9 @@ function findIncons(ps,baixas){
     const soma=Math.round(vals.reduce((s,v)=>s+v,0)*100)/100;const lbl=`${p.loja} (${fD(p.data)}) – id ${p.id}`;
     // entrada + parcelas iguais (ex.: Iphone): não é inconsistência
     const entrada=n===p.parcelas+1&&Math.abs(soma-p.total)<=0.1&&vals.slice(1).every(v=>v===vals[1])&&vals[0]!==vals[1];
-    if(!entrada&&n!==p.parcelas)add("Erro","Parcelas × meses lançados",lbl,`${p.parcelas} parcelas, mas ${n} meses lançados (${k.join(", ")}).`,"p"+p.id);
-    if(!entrada&&Math.abs(soma-p.total)>Math.max(.05,.01*n))add("Erro","Soma das parcelas × total",lbl,`Meses somam ${fB(soma)}; total da compra ${fB(p.total)} (diferença ${fB(Math.abs(soma-p.total))}).`,"p"+p.id);
+    // Parcelas × meses já explica a diferença de soma: uma compra gera um só erro
+    if(!entrada&&n!==p.parcelas)add("Erro","Parcelas × meses lançados",lbl,`${p.parcelas} parcelas, mas ${n} meses lançados (${k.join(", ")}). Meses somam ${fB(soma)}; total da compra ${fB(p.total)}.`,"p"+p.id);
+    else if(!entrada&&Math.abs(soma-p.total)>Math.max(.05,.01*n))add("Erro","Soma das parcelas × total",lbl,`Meses somam ${fB(soma)}; total da compra ${fB(p.total)} (diferença ${fB(Math.abs(soma-p.total))}).`,"p"+p.id);
     if(k.some((m,i)=>i&&mIdx(m)-mIdx(k[i-1])!==1))add("Erro","Meses fora de sequência",lbl,`Meses lançados: ${k.join(", ")}.`,"p"+p.id);
     if(vals.some(v=>!(v>0)))add("Erro","Valor inválido",lbl,"Há parcela com valor zero ou negativo.","p"+p.id);
     if(!p.data)add("Atenção","Compra sem data",lbl,`Primeiro mês lançado: ${k[0]||"—"}.`,"p"+p.id);
