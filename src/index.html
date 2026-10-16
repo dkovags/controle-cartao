@@ -93,7 +93,7 @@ const pJ=v=>typeof v==="string"?JSON.parse(v):v;
 function parseDoc(d){
   const baixas=pJ(d.baixas)||{};
   Object.keys(SEED_BX).forEach(m=>{if(!baixas[m])baixas[m]=SEED_BX[m];});
-  return{purchases:pJ(d.purchases)||[],people:pJ(d.people)||{},baixas,updatedAt:d.updatedAt||null,rev:d.rev||0,history:pJ(d.history)||[]};
+  return{purchases:pJ(d.purchases)||[],people:pJ(d.people)||{},baixas,updatedAt:d.updatedAt||null,rev:d.rev||0,history:pJ(d.history)||[],incOk:pJ(d.incOk)||{}};
 }
 // Primeiro acesso à homologação: copia os dados da produção
 async function prepDoc(){
@@ -110,7 +110,7 @@ async function saveTx(next,baseRev,changes,who){
     const hist=s.exists?(pJ(s.data().history)||[]):[];const now=new Date().toISOString();
     if(changes.length)hist.push({ts:now,user:who,changes});
     while(hist.length>500)hist.shift();
-    t.set(ref,{purchases:JSON.stringify(next.purchases),people:JSON.stringify(next.people),baixas:JSON.stringify(next.baixas),updatedAt:now,rev:cur+1,history:JSON.stringify(hist)});
+    t.set(ref,{purchases:JSON.stringify(next.purchases),people:JSON.stringify(next.people),baixas:JSON.stringify(next.baixas),incOk:JSON.stringify(next.incOk||{}),updatedAt:now,rev:cur+1,history:JSON.stringify(hist)});
     return{rev:cur+1,now,hist};
   });
 }
@@ -142,6 +142,9 @@ function diffData(a,b){
     n.forEach(x=>{const k=JSON.stringify(x);if(cnt[k])cnt[k]--;else out.push(`Nova baixa em ${m}: ${bk(x)}`);});
     Object.entries(cnt).forEach(([k,c])=>{for(let i=0;i<c;i++)out.push(`Baixa excluída em ${m}: ${bk(JSON.parse(k))}`);});
   });
+  const ia=a.incOk||{},ib=b.incOk||{};
+  Object.keys(ib).forEach(k=>{if(!ia[k])out.push(`Inconsistência marcada como tratada: ${ib[k].label||k}`);});
+  Object.keys(ia).forEach(k=>{if(!ib[k])out.push(`Inconsistência reaberta: ${ia[k].label||k}`);});
   new Set([...Object.keys(a.people),...Object.keys(b.people)]).forEach(n=>{if(JSON.stringify(a.people[n])!==JSON.stringify(b.people[n]))out.push(`Terceiros alterados: ${n}`);});
   return out;
 }
@@ -275,31 +278,31 @@ const nrm=s=>s.normalize("NFD").replace(/[̀-ͯ]/g,"").toLowerCase().replace(/[^
 // Parecidos: todas as palavras (2+ letras) de um nome aparecem no outro, inteiras ou abreviadas, com ao menos uma de 3+ letras
 function similarNames(a,b){const A=nrm(a).filter(w=>w.length>=2),B=nrm(b).filter(w=>w.length>=2);if(!A.length||!B.length)return false;const sub=(s,l)=>s.every(w=>l.some(x=>x===w||x.startsWith(w)))&&s.some(w=>w.length>=3);return sub(A,B)||sub(B,A);}
 function findIncons(ps,baixas){
-  const out=[];const add=(sev,cat,title,detail)=>out.push({sev,cat,title,detail});
+  const out=[];const add=(sev,cat,title,detail,kp)=>out.push({sev,cat,title,detail,key:cat+"|"+kp});
   ps.forEach(p=>{
     const k=Object.keys(p.monthly||{}).sort((a,b)=>mIdx(a)-mIdx(b));const vals=k.map(m=>p.monthly[m]);const n=k.length;
     const soma=Math.round(vals.reduce((s,v)=>s+v,0)*100)/100;const lbl=`${p.loja} (${fD(p.data)}) – id ${p.id}`;
     // entrada + parcelas iguais (ex.: Iphone): não é inconsistência
     const entrada=n===p.parcelas+1&&Math.abs(soma-p.total)<=0.1&&vals.slice(1).every(v=>v===vals[1])&&vals[0]!==vals[1];
-    if(!entrada&&n!==p.parcelas)add("Erro","Parcelas × meses lançados",lbl,`${p.parcelas} parcelas, mas ${n} meses lançados (${k.join(", ")}).`);
-    if(!entrada&&Math.abs(soma-p.total)>Math.max(.05,.01*n))add("Erro","Soma das parcelas × total",lbl,`Meses somam ${fB(soma)}; total da compra ${fB(p.total)} (diferença ${fB(Math.abs(soma-p.total))}).`);
-    if(k.some((m,i)=>i&&mIdx(m)-mIdx(k[i-1])!==1))add("Erro","Meses fora de sequência",lbl,`Meses lançados: ${k.join(", ")}.`);
-    if(vals.some(v=>!(v>0)))add("Erro","Valor inválido",lbl,"Há parcela com valor zero ou negativo.");
-    if(!p.data)add("Atenção","Compra sem data",lbl,`Primeiro mês lançado: ${k[0]||"—"}.`);
-    else if(!dKey(p))add("Erro","Data da compra inválida",lbl,`Data registrada: "${p.data}".`);
+    if(!entrada&&n!==p.parcelas)add("Erro","Parcelas × meses lançados",lbl,`${p.parcelas} parcelas, mas ${n} meses lançados (${k.join(", ")}).`,"p"+p.id);
+    if(!entrada&&Math.abs(soma-p.total)>Math.max(.05,.01*n))add("Erro","Soma das parcelas × total",lbl,`Meses somam ${fB(soma)}; total da compra ${fB(p.total)} (diferença ${fB(Math.abs(soma-p.total))}).`,"p"+p.id);
+    if(k.some((m,i)=>i&&mIdx(m)-mIdx(k[i-1])!==1))add("Erro","Meses fora de sequência",lbl,`Meses lançados: ${k.join(", ")}.`,"p"+p.id);
+    if(vals.some(v=>!(v>0)))add("Erro","Valor inválido",lbl,"Há parcela com valor zero ou negativo.","p"+p.id);
+    if(!p.data)add("Atenção","Compra sem data",lbl,`Primeiro mês lançado: ${k[0]||"—"}.`,"p"+p.id);
+    else if(!dKey(p))add("Erro","Data da compra inválida",lbl,`Data registrada: "${p.data}".`,"p"+p.id);
   });
   Object.keys(baixas).sort((a,b)=>mIdx(a)-mIdx(b)).forEach(m=>{
     const mi=mIdx(m);const seen={};
     (baixas[m]||[]).forEach((b,i)=>{
-      const lbl=`Baixa ${i+1} de ${m}`;const d=/^(\d{2})\/(\d{2})\/(\d{4})$/.exec(b.date||"");
-      if(!(b.amount>0))add("Erro","Valor inválido",lbl,`Valor: ${fB(b.amount)}.`);
-      if(!d)add("Erro","Data de baixa inválida",lbl,`Data registrada: "${b.date}".`);
-      else{const j=mIdx(`${MN[+d[2]-1]}/${d[3]}`);if(j!==mi&&j!==mi-1)add("Erro","Baixa fora do período da fatura",lbl,`${fB(b.amount)} pago em ${b.date}; esperado entre o mês anterior e ${m}.`);}
-      const key=b.amount+"|"+b.date;seen[key]=(seen[key]||0)+1;if(seen[key]===2)add("Atenção","Possível baixa duplicada",`Baixas de ${m}`,`Mais de uma baixa de ${fB(b.amount)} em ${fD(b.date)}. Confirme se foram pagamentos distintos.`);
+      const lbl=`Baixa ${i+1} de ${m}`;const bk=`${m}|${b.date}|${b.amount}`;const d=/^(\d{2})\/(\d{2})\/(\d{4})$/.exec(b.date||"");
+      if(!(b.amount>0))add("Erro","Valor inválido",lbl,`Valor: ${fB(b.amount)}.`,bk);
+      if(!d)add("Erro","Data de baixa inválida",lbl,`Data registrada: "${b.date}".`,bk);
+      else{const j=mIdx(`${MN[+d[2]-1]}/${d[3]}`);if(j!==mi&&j!==mi-1)add("Erro","Baixa fora do período da fatura",lbl,`${fB(b.amount)} pago em ${b.date}; esperado entre o mês anterior e ${m}.`,bk);}
+      const key=b.amount+"|"+b.date;seen[key]=(seen[key]||0)+1;if(seen[key]===2)add("Atenção","Possível baixa duplicada",`Baixas de ${m}`,`Mais de uma baixa de ${fB(b.amount)} em ${fD(b.date)}. Confirme se foram pagamentos distintos.`,bk);
     });
   });
   const names=[...new Set(ps.map(p=>p.loja))].sort();const used=new Set();
-  names.forEach(a=>{if(used.has(a))return;const g=names.filter(b=>b!==a&&!used.has(b)&&similarNames(a,b));if(g.length){[a,...g].forEach(x=>used.add(x));add("Atenção","Nomes de loja parecidos",[a,...g].join(" / "),"Podem ser a mesma loja escrita de formas diferentes.");}});
+  names.forEach(a=>{if(used.has(a))return;const g=names.filter(b=>b!==a&&!used.has(b)&&similarNames(a,b));if(g.length){[a,...g].forEach(x=>used.add(x));add("Atenção","Nomes de loja parecidos",[a,...g].join(" / "),"Podem ser a mesma loja escrita de formas diferentes.",[a,...g].join("/"));}});
   return[...out.filter(i=>i.sev==="Erro"),...out.filter(i=>i.sev!=="Erro")];
 }
 function IncSheet({items}){
@@ -318,12 +321,10 @@ function IncSheet({items}){
 function Relat({ps,baixas,mt,am}){
   const months=[...am].reverse();
   const[m,setM]=useState(am.includes(cmk())?cmk():months[0]);const[tipo,setTipo]=useState("ambos");const[open,setOpen]=useState(null);
-  const inc=useMemo(()=>findIncons(ps,baixas),[ps,baixas]);
   const card={background:Z.cd,border:`1px solid ${Z.bd}`,borderRadius:10,padding:16,marginBottom:18};
   const sel={background:Z.cd2,color:Z.tx,border:`1px solid ${Z.bd}`,borderRadius:6,padding:"6px 9px",fontSize:12,fontFamily:Z.ft};
   const btn={background:`linear-gradient(135deg,${Z.ac3},${Z.ac2})`,color:"#fff",border:"none",borderRadius:6,padding:"8px 16px",fontSize:12,fontWeight:600,cursor:"pointer",fontFamily:Z.ft};
   const tipos=[["ambos","Lançamentos e baixas"],["lanc","Só lançamentos"],["bx","Só baixas"]];
-  const nErr=inc.filter(i=>i.sev==="Erro").length,nAt=inc.length-nErr;
   return(<div>
     <div style={card}>
       <div style={{fontSize:12,fontWeight:600,color:Z.ac,marginBottom:12}}>Lançamentos e baixas do mês</div>
@@ -333,21 +334,46 @@ function Relat({ps,baixas,mt,am}){
       </div>
       <button onClick={()=>setOpen("mes")} style={btn}>Visualizar e imprimir</button>
     </div>
-    <div style={card}>
-      <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",gap:8,flexWrap:"wrap",marginBottom:10}}>
-        <div style={{fontSize:12,fontWeight:600,color:Z.ac}}>Inconsistências</div>
-        <span style={{fontSize:11,color:Z.tx2}}><span style={{color:nErr?Z.rd:Z.gn,fontWeight:600}}>{nErr} erro{nErr!==1?"s":""}</span> · <span style={{color:nAt?Z.yl:Z.gn,fontWeight:600}}>{nAt} atenção</span></span>
-      </div>
-      <div style={{fontSize:10,color:Z.tx3,marginBottom:10}}>Verificação automática dos dados: parcelas × meses, soma × total, sequência de meses, datas e valores inválidos, baixas fora do período ou repetidas e nomes de loja parecidos.</div>
-      {inc.map((i,k)=>(<div key={k} style={{padding:"8px 0",borderTop:`1px solid ${Z.bd}`,fontSize:11}}>
+    {open==="mes"&&<PrintShell onClose={()=>setOpen(null)}><MonthSheet sm={m} {...{ps,baixas,mt}} showL={tipo!=="bx"} showB={tipo!=="lanc"}/></PrintShell>}
+  </div>);
+}
+
+// Aba Inconsistências (só admin): seleção para impressão e marcação de tratadas
+function Incons({ps,baixas,incOk,setIncOk,user}){
+  const all=useMemo(()=>findIncons(ps,baixas),[ps,baixas]);
+  const[filtro,setFiltro]=useState("pend");const[sel,setSel]=useState({});const[open,setOpen]=useState(false);
+  const pend=all.filter(i=>!incOk[i.key]);const trat=all.filter(i=>incOk[i.key]);
+  const list=filtro==="pend"?pend:filtro==="trat"?trat:all;
+  const selList=all.filter(i=>sel[i.key]);
+  const toggleOk=i=>setIncOk(o=>{const n={...o};if(n[i.key])delete n[i.key];else n[i.key]={by:user?.email||"",ts:new Date().toISOString(),label:`${i.cat}: ${i.title}`};return n;});
+  const nErr=pend.filter(i=>i.sev==="Erro").length,nAt=pend.length-nErr;
+  const card={background:Z.cd,border:`1px solid ${Z.bd}`,borderRadius:10,padding:16,marginBottom:18};
+  const btn={background:`linear-gradient(135deg,${Z.ac3},${Z.ac2})`,color:"#fff",border:"none",borderRadius:6,padding:"7px 14px",fontSize:11,fontWeight:600,cursor:"pointer",fontFamily:Z.ft};
+  const btn2={background:Z.cd2,color:Z.tx2,border:`1px solid ${Z.bd}`,borderRadius:6,padding:"7px 12px",fontSize:11,cursor:"pointer",fontFamily:Z.ft};
+  const fmt=t=>new Date(t).toLocaleString("pt-BR",{day:"2-digit",month:"2-digit",year:"numeric",hour:"2-digit",minute:"2-digit"});
+  return(<div style={card}>
+    <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",gap:8,flexWrap:"wrap",marginBottom:8}}>
+      <div style={{fontSize:12,fontWeight:600,color:Z.ac}}>Análise de inconsistências</div>
+      <span style={{fontSize:11,color:Z.tx2}}>Pendentes: <span style={{color:nErr?Z.rd:Z.gn,fontWeight:600}}>{nErr} erro{nErr!==1?"s":""}</span> · <span style={{color:nAt?Z.yl:Z.gn,fontWeight:600}}>{nAt} atenção</span> · <span style={{color:Z.gn}}>{trat.length} tratada{trat.length!==1?"s":""}</span></span>
+    </div>
+    <div style={{fontSize:10,color:Z.tx3,marginBottom:12}}>Marque "Tratada" quando o caso estiver resolvido ou confirmado como correto: ele sai das contagens e do relatório, mas continua disponível no filtro "Tratadas". Use a caixa da esquerda para escolher o que imprimir.</div>
+    <div style={{display:"flex",gap:6,flexWrap:"wrap",alignItems:"center",marginBottom:10}}>
+      {[["pend",`Pendentes (${pend.length})`],["trat",`Tratadas (${trat.length})`],["all",`Todas (${all.length})`]].map(([v,l])=>(<button key={v} onClick={()=>setFiltro(v)} style={{...btn2,background:filtro===v?`${Z.ac3}30`:Z.cd2,color:filtro===v?Z.ac:Z.tx2}}>{l}</button>))}
+      <span style={{flex:1}}/>
+      <button onClick={()=>setSel(s=>{const n={...s};const allSel=list.every(i=>n[i.key]);list.forEach(i=>{if(allSel)delete n[i.key];else n[i.key]=true;});return n;})} style={btn2}>{list.length&&list.every(i=>sel[i.key])?"Desmarcar":"Selecionar"} todas da lista</button>
+      <button disabled={!selList.length} onClick={()=>setOpen(true)} style={{...btn,opacity:selList.length?1:.4,cursor:selList.length?"pointer":"not-allowed"}}>Imprimir selecionadas ({selList.length})</button>
+    </div>
+    {list.map(i=>{const ok=incOk[i.key];return(<div key={i.key} style={{display:"flex",gap:10,alignItems:"flex-start",padding:"9px 0",borderTop:`1px solid ${Z.bd}`,fontSize:11,opacity:ok?.6:1}}>
+      <input type="checkbox" title="Selecionar para impressão" checked={!!sel[i.key]} onChange={()=>setSel(s=>({...s,[i.key]:!s[i.key]}))} style={{width:16,height:16,marginTop:1,accentColor:Z.ac2,flexShrink:0}}/>
+      <div style={{flex:1,minWidth:0}}>
         <div style={{display:"flex",gap:6,alignItems:"center",flexWrap:"wrap"}}><span style={{fontSize:9,fontWeight:700,padding:"1px 6px",borderRadius:4,background:i.sev==="Erro"?`${Z.rd}25`:`${Z.yl}25`,color:i.sev==="Erro"?Z.rd:Z.yl}}>{i.sev}</span><span style={{color:Z.tx2}}>{i.cat}</span></div>
         <div style={{marginTop:3,color:Z.tx,fontWeight:500}}>{i.title}</div><div style={{color:Z.tx2,marginTop:1}}>{i.detail}</div>
-      </div>))}
-      {!inc.length&&<div style={{fontSize:11,color:Z.gn}}>Nenhuma inconsistência encontrada.</div>}
-      <button onClick={()=>setOpen("inc")} style={{...btn,marginTop:12}}>Visualizar e imprimir</button>
-    </div>
-    {open==="mes"&&<PrintShell onClose={()=>setOpen(null)}><MonthSheet sm={m} {...{ps,baixas,mt}} showL={tipo!=="bx"} showB={tipo!=="lanc"}/></PrintShell>}
-    {open==="inc"&&<PrintShell onClose={()=>setOpen(null)}><IncSheet items={inc}/></PrintShell>}
+        {ok&&<div style={{color:Z.gn,fontSize:10,marginTop:3}}>Tratada em {fmt(ok.ts)}{ok.by?` por ${ok.by}`:""}</div>}
+      </div>
+      <label style={{display:"flex",alignItems:"center",gap:5,fontSize:10,color:ok?Z.gn:Z.tx2,cursor:"pointer",whiteSpace:"nowrap",flexShrink:0}}><input type="checkbox" checked={!!ok} onChange={()=>toggleOk(i)} style={{width:15,height:15,accentColor:Z.gn}}/>Tratada</label>
+    </div>);})}
+    {!list.length&&<div style={{fontSize:11,color:Z.gn,padding:"8px 0"}}>{filtro==="trat"?"Nenhuma inconsistência tratada ainda.":"Nenhuma inconsistência pendente."}</div>}
+    {open&&<PrintShell onClose={()=>setOpen(false)}><IncSheet items={selList}/></PrintShell>}
   </div>);
 }
 
@@ -367,7 +393,7 @@ function Hist({history}){
 
 function App(){
   const[user,setUser]=useState(null);const[role,setRole]=useState(null);const[authLoading,setAuthLoading]=useState(true);const[authError,setAuthError]=useState(null);
-  const[ps,setPs]=useState([]);const[ppl,setPpl]=useState({});const[baixas,setBaixas]=useState({});const[ok,setOk]=useState(false);const[saving,setSaving]=useState(false);const[lastUpdate,setLastUpdate]=useState(null);const[loadErr,setLoadErr]=useState(null);const[history,setHistory]=useState([]);
+  const[ps,setPs]=useState([]);const[ppl,setPpl]=useState({});const[baixas,setBaixas]=useState({});const[ok,setOk]=useState(false);const[saving,setSaving]=useState(false);const[lastUpdate,setLastUpdate]=useState(null);const[loadErr,setLoadErr]=useState(null);const[history,setHistory]=useState([]);const[incOk,setIncOk]=useState({});
   const[tab,setTab]=useState("dashboard");const[sm,setSm]=useState(cmk());const[sf,setSf]=useState(false);const[ep,setEp]=useState(null);const[sr,setSr]=useState("");const[toast,setToast]=useState(null);
   const isAdmin=role==="admin";
 
@@ -395,29 +421,29 @@ function App(){
   const svRef=useRef(null);const baseRef=useRef(null);const revRef=useRef(-1);const tr=useRef(null);
   const applyRemote=(d)=>{
     if(d.rev<=revRef.current)return;
-    revRef.current=d.rev;baseRef.current={purchases:d.purchases,people:d.people,baixas:d.baixas};
+    revRef.current=d.rev;baseRef.current={purchases:d.purchases,people:d.people,baixas:d.baixas,incOk:d.incOk};
     svRef.current=JSON.stringify(baseRef.current);
     if(tr.current){clearTimeout(tr.current);tr.current=null;}
-    setPs(fixTrunc(d.purchases));setPpl(d.people);setBaixas(d.baixas);setHistory(d.history);setLastUpdate(d.updatedAt);setOk(true);
+    setPs(fixTrunc(d.purchases));setPpl(d.people);setBaixas(d.baixas);setIncOk(d.incOk);setHistory(d.history);setLastUpdate(d.updatedAt);setOk(true);
   };
   useEffect(()=>{if(!user||!role)return;
-    if(!initFB()){(async()=>{const d=await ldLocal();const x=d||{purchases:SEED_P,people:SEED_PPL,baixas:SEED_BX,updatedAt:null,rev:0,history:[]};revRef.current=-1;applyRemote(x);})();return;}
+    if(!initFB()){(async()=>{const d=await ldLocal();const x=d||{purchases:SEED_P,people:SEED_PPL,baixas:SEED_BX,updatedAt:null,rev:0,history:[],incOk:{}};revRef.current=-1;applyRemote(x);})();return;}
     let unsub=null,cancel=false;
     (async()=>{try{const ref=await prepDoc();if(cancel)return;
       unsub=ref.onSnapshot(snap=>{
         if(!snap.exists){setLoadErr("Base de dados não encontrada");return;}
         const d=parseDoc(snap.data());
-        if(okRef.current&&d.rev>revRef.current&&JSON.stringify({purchases:d.purchases,people:d.people,baixas:d.baixas})!==JSON.stringify({purchases:ps0.current,people:ppl0.current,baixas:bx0.current}))tt("Dados atualizados em outro dispositivo");
+        if(okRef.current&&d.rev>revRef.current&&JSON.stringify({purchases:d.purchases,people:d.people,baixas:d.baixas,incOk:d.incOk})!==JSON.stringify({purchases:ps0.current,people:ppl0.current,baixas:bx0.current,incOk:inc0.current}))tt("Dados atualizados em outro dispositivo");
         applyRemote(d);
       },e=>setLoadErr(String(e?.code||e?.message||e)));
     }catch(e){setLoadErr(String(e?.code||e?.message||e));}})();
     return()=>{cancel=true;if(unsub)unsub();};
   },[user,role]);
-  const okRef=useRef(false);okRef.current=ok;const ps0=useRef(ps);ps0.current=ps;const ppl0=useRef(ppl);ppl0.current=ppl;const bx0=useRef(baixas);bx0.current=baixas;
+  const okRef=useRef(false);okRef.current=ok;const ps0=useRef(ps);ps0.current=ps;const ppl0=useRef(ppl);ppl0.current=ppl;const bx0=useRef(baixas);bx0.current=baixas;const inc0=useRef(incOk);inc0.current=incOk;
 
   // Gravação automática (só admin): só quando algo mudou de fato, com histórico
-  useEffect(()=>{if(!ok||!isAdmin)return;const snap=JSON.stringify({purchases:ps,people:ppl,baixas});if(snap===svRef.current)return;if(tr.current)clearTimeout(tr.current);
-    tr.current=setTimeout(async()=>{tr.current=null;const next={purchases:ps,people:ppl,baixas};const changes=diffData(baseRef.current,next);setSaving(true);
+  useEffect(()=>{if(!ok||!isAdmin)return;const snap=JSON.stringify({purchases:ps,people:ppl,baixas,incOk});if(snap===svRef.current)return;if(tr.current)clearTimeout(tr.current);
+    tr.current=setTimeout(async()=>{tr.current=null;const next={purchases:ps,people:ppl,baixas,incOk};const changes=diffData(baseRef.current,next);setSaving(true);
       try{
         if(!initFB()){const now=new Date().toISOString();await svLocal({...next,updatedAt:now});svRef.current=snap;baseRef.current=next;setLastUpdate(now);setHistory(h=>changes.length?[...h,{ts:now,user:user.email,changes}]:h);tt("Salvo localmente");return;}
         const r=await saveTx(next,Math.max(revRef.current,0),changes,user.email);
@@ -426,7 +452,7 @@ function App(){
         if(e?.code==="conflict"){tt("Os dados foram alterados em outro dispositivo. Sua última alteração não foi salva; confira e refaça.",6e3);const s2=await initFB().doc(DOC_PATH).get();revRef.current=-1;applyRemote(parseDoc(s2.data()));}
         else tt("Erro ao salvar: "+(e?.code||e?.message||e),6e3);
       }finally{setSaving(false);}
-    },.8e3);},[ps,ppl,baixas,ok]);
+    },.8e3);},[ps,ppl,baixas,incOk,ok]);
   const tt=(m,ms=2e3)=>{setToast(m);setTimeout(()=>setToast(null),ms);};
   const am=useMemo(()=>{const s=new Set([cmk()]);ps.forEach(p=>Object.keys(p.monthly).forEach(m=>s.add(m)));Object.keys(baixas).forEach(m=>{if((baixas[m]||[]).length)s.add(m);});return MO.filter(m=>s.has(m));},[ps,baixas]);
   const mt=useMemo(()=>{const t={};am.forEach(m=>{t[m]=0;});ps.forEach(p=>Object.entries(p.monthly).forEach(([m,v])=>{t[m]=(t[m]||0)+v;}));return t;},[ps,am]);
@@ -512,7 +538,7 @@ function App(){
     </header>
 
     <nav style={{display:"flex",gap:1,padding:"0 18px",background:Z.cd,borderBottom:`1px solid ${Z.bd}`,overflowX:"auto",WebkitOverflowScrolling:"touch"}}>
-      {[["dashboard","Dashboard"],["purchases","Compras"],["baixas","Baixas"],/*["people","Terceiros"],*/["reports","Gráficos"],["relatorios","Relatórios"],["history","Histórico"]].map(([id,lb])=>(<button key={id} onClick={()=>setTab(id)} style={{background:tab===id?Z.cd2:"transparent",color:tab===id?Z.ac:Z.tx2,border:"none",borderBottom:tab===id?`2px solid ${Z.ac2}`:"2px solid transparent",padding:"10px 13px",fontSize:11,fontWeight:500,cursor:"pointer"}}>{lb}</button>))}
+      {[["dashboard","Dashboard"],["purchases","Compras"],["baixas","Baixas"],/*["people","Terceiros"],*/["reports","Gráficos"],["relatorios","Relatórios"],...(isAdmin?[["incons","Inconsistências"]]:[]),["history","Histórico"]].map(([id,lb])=>(<button key={id} onClick={()=>setTab(id)} style={{background:tab===id?Z.cd2:"transparent",color:tab===id?Z.ac:Z.tx2,border:"none",borderBottom:tab===id?`2px solid ${Z.ac2}`:"2px solid transparent",padding:"10px 13px",fontSize:11,fontWeight:500,cursor:"pointer"}}>{lb}</button>))}
     </nav>
 
     <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",padding:"6px 18px",background:Z.bg,borderBottom:`1px solid ${Z.bd}`,fontSize:10,color:Z.tx3,flexWrap:"wrap",gap:4}}>
@@ -527,6 +553,7 @@ function App(){
       {/*tab==="people"&&<Ppl ppl={ppl} setPpl={setPpl} isAdmin={isAdmin}/>*/}
       {tab==="reports"&&<Rpts {...{ps,mt,am}}/>}
       {tab==="relatorios"&&<Relat {...{ps,baixas,mt,am}}/>}
+      {tab==="incons"&&isAdmin&&<Incons {...{ps,baixas,incOk,setIncOk,user}}/>}
       {tab==="history"&&<Hist history={history}/>}
     </main>
 
