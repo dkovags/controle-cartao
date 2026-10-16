@@ -222,7 +222,11 @@ const pR={textAlign:"right",whiteSpace:"nowrap"};
 const pTf={...pTd,fontWeight:700,borderTop:"2px solid #333",borderBottom:"none"};
 const nowBR=()=>new Date().toLocaleString("pt-BR",{day:"2-digit",month:"2-digit",year:"numeric",hour:"2-digit",minute:"2-digit"});
 // Janela com prévia em folha branca; ao imprimir, só a folha sai no papel
-function PrintShell({controls,onClose,children}){
+// Nome do arquivo ao "Salvar como PDF": o navegador usa o título da página
+const pdfName=(title,comp)=>`${IS_HML?"[HML] ":""}${title} - ${comp}`.replace(/\//g,"-");
+const monthTitle=(showL,showB)=>showL&&showB?"Relatório de Lançamentos e Baixas":showL?"Relatório de Lançamentos":"Relatório de Baixas";
+function PrintShell({controls,onClose,children,docName}){
+  useEffect(()=>{if(!docName)return;const old=document.title;document.title=docName;return()=>{document.title=old;};},[docName]);
   const btn={border:"none",borderRadius:6,padding:"8px 16px",fontSize:12,fontWeight:600,cursor:"pointer",fontFamily:Z.ft};
   return ReactDOM.createPortal(<div className="print-modal" style={{position:"fixed",inset:0,background:"rgba(0,0,0,.7)",zIndex:300,overflowY:"auto",padding:16,fontFamily:Z.ft}}>
     <div className="no-print" style={{maxWidth:760,margin:"0 auto 10px",display:"flex",justifyContent:"space-between",alignItems:"center",gap:10,flexWrap:"wrap",background:Z.cd,border:`1px solid ${Z.bd2}`,borderRadius:10,padding:"10px 14px"}}>
@@ -252,7 +256,7 @@ function ReportDoc({title,comp,children}){
 function MonthSheet({sm,ps,baixas,mt,showL,showB,incErr}){
   const rows=ps.filter(p=>p.monthly[sm]>0).sort((a,b)=>dKey(b)-dKey(a)).map(p=>{const k=Object.keys(p.monthly).sort((x,y)=>MO.indexOf(x)-MO.indexOf(y));return{...p,v:p.monthly[sm],n:k.indexOf(sm)+1,N:Math.max(p.parcelas||0,k.length)};});
   const tot=mt[sm]||0;const bx=baixas[sm]||[];const tb=bx.reduce((s,b)=>s+b.amount,0);
-  const title=showL&&showB?"Relatório de Lançamentos e Baixas":showL?"Relatório de Lançamentos":"Relatório de Baixas";
+  const title=monthTitle(showL,showB);
   return(<ReportDoc title={title} comp={sm}>
     {showL&&(rows.length?(<table style={{width:"100%",borderCollapse:"collapse"}}>
       <thead><tr><th style={pTh}>Data da compra</th><th style={pTh}>Loja</th><th style={{...pTh,textAlign:"center"}}>Parcela</th><th style={{...pTh,...pR}}>Valor</th></tr></thead>
@@ -293,7 +297,7 @@ function MonthSheet({sm,ps,baixas,mt,showL,showB,incErr}){
 // Impressão rápida do Dashboard: lançamentos, com opção de incluir as baixas
 function PrintMonth({sm,ps,baixas,mt,onClose}){
   const[withBx,setWithBx]=useState(false);
-  return(<PrintShell onClose={onClose} controls={<label style={{display:"flex",alignItems:"center",gap:8,fontSize:12,color:Z.tx,cursor:"pointer"}}><input type="checkbox" checked={withBx} onChange={e=>setWithBx(e.target.checked)} style={{width:16,height:16,accentColor:Z.ac2}}/>Incluir as baixas do mês</label>}>
+  return(<PrintShell docName={pdfName(monthTitle(true,withBx),sm)} onClose={onClose} controls={<label style={{display:"flex",alignItems:"center",gap:8,fontSize:12,color:Z.tx,cursor:"pointer"}}><input type="checkbox" checked={withBx} onChange={e=>setWithBx(e.target.checked)} style={{width:16,height:16,accentColor:Z.ac2}}/>Incluir as baixas do mês</label>}>
     <MonthSheet {...{sm,ps,baixas,mt}} showL={true} showB={withBx}/>
   </PrintShell>);
 }
@@ -446,7 +450,7 @@ function Relat({ps,baixas,mt,am,incOk}){
       <label style={{display:"flex",alignItems:"center",gap:8,fontSize:12,color:Z.tx,cursor:"pointer",marginBottom:14}}><input type="checkbox" checked={comInc} onChange={e=>setComInc(e.target.checked)} style={{width:16,height:16,accentColor:Z.ac2}}/>Incluir os valores das inconsistências do tipo erro</label>
       <button onClick={()=>setOpen("mes")} style={btn}>Visualizar e imprimir</button>
     </div>
-    {open==="mes"&&<PrintShell onClose={()=>setOpen(null)}><MonthSheet sm={m} {...{ps,baixas,mt}} showL={tipo!=="bx"} showB={tipo!=="lanc"} incErr={comInc?incErr:null}/></PrintShell>}
+    {open==="mes"&&<PrintShell docName={pdfName(monthTitle(tipo!=="bx",tipo!=="lanc"),m)} onClose={()=>setOpen(null)}><MonthSheet sm={m} {...{ps,baixas,mt}} showL={tipo!=="bx"} showB={tipo!=="lanc"} incErr={comInc?incErr:null}/></PrintShell>}
   </div>);
 }
 
@@ -490,7 +494,7 @@ function Incons({ps,baixas,incOk,setIncOk,user}){
       </div>
     </div>);})}
     {!list.length&&<div style={{fontSize:11,color:Z.gn,padding:"8px 0"}}>{filtro==="trat"?"Nenhuma inconsistência tratada ainda.":"Nenhuma inconsistência pendente."}</div>}
-    {open&&<PrintShell onClose={()=>setOpen(false)}><IncSheet items={selList} {...{ps,baixas}}/></PrintShell>}
+    {open&&<PrintShell docName={pdfName("Relatório de Inconsistências",compInc(selList,ps))} onClose={()=>setOpen(false)}><IncSheet items={selList} {...{ps,baixas}}/></PrintShell>}
   </div>);
 }
 
