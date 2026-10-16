@@ -83,6 +83,8 @@ async function loginGoogle(){
   try{const result=await auth.signInWithPopup(provider);return result.user;}catch(e){console.error("Login error:",e);return null;}
 }
 async function logout(){const auth=getAuth();if(auth)await auth.signOut();}
+let CUR_EMAIL="";
+function currentUser(){try{return getAuth()?.currentUser?.email||CUR_EMAIL;}catch{return CUR_EMAIL;}}
 function getUserRole(email){return ROLES[email]||null;}
 // Homologação (/homolog/) grava em documento separado, sem tocar a produção
 const APP_VERSION="__VERSION__";
@@ -127,7 +129,7 @@ async function svLocal(d){try{await window.storage.set("cc-despesas-v10",JSON.st
 function diffData(a,b){
   const out=[];const pd=p=>`${p.loja} (${fD(p.data)})`;
   const A=new Map(a.purchases.map(p=>[p.id,p])),B=new Map(b.purchases.map(p=>[p.id,p]));
-  B.forEach((p,id)=>{if(!A.has(id))out.push(`Nova compra: ${pd(p)} – ${fB(p.total)} em ${p.parcelas}x`);});
+  B.forEach((p,id)=>{if(!A.has(id))out.push(`Nova compra: ${pd(p)} – ${fB(p.total)} em ${p.parcelas}x${p.anexos?.length?" (com comprovante)":""}`);});
   A.forEach((p,id)=>{if(!B.has(id))out.push(`Compra excluída: ${pd(p)} – ${fB(p.total)} em ${p.parcelas}x`);});
   B.forEach((p,id)=>{const o=A.get(id);if(!o||JSON.stringify(o)===JSON.stringify(p))return;const f=[];
     if(o.loja!==p.loja)f.push(`loja ${o.loja} → ${p.loja}`);
@@ -135,8 +137,9 @@ function diffData(a,b){
     if(o.total!==p.total)f.push(`total ${fB(o.total)} → ${fB(p.total)}`);
     if(o.parcelas!==p.parcelas)f.push(`parcelas ${o.parcelas} → ${p.parcelas}`);
     if(JSON.stringify(o.monthly)!==JSON.stringify(p.monthly))f.push(`meses: ${Object.keys(o.monthly).length} → ${Object.keys(p.monthly).length}`);
+    if((p.anexos||[]).length>(o.anexos||[]).length)f.push("comprovante anexado");
     out.push(`Compra alterada: ${pd(o)}${f.length?" – "+f.join("; "):""}`);});
-  const bk=x=>`${fB(x.amount)} (${fD(x.date)})`;
+  const bk=x=>`${fB(x.amount)} (${fD(x.date)})${x.anexos?.length?" com comprovante":""}`;
   new Set([...Object.keys(a.baixas),...Object.keys(b.baixas)]).forEach(m=>{
     const o=a.baixas[m]||[],n=b.baixas[m]||[];if(JSON.stringify(o)===JSON.stringify(n))return;
     if(o.length===n.length){n.forEach((x,i)=>{if(JSON.stringify(x)!==JSON.stringify(o[i]))out.push(`Baixa alterada em ${m}: ${bk(o[i])} → ${bk(x)}`);});return;}
@@ -149,6 +152,25 @@ function diffData(a,b){
   Object.keys(ia).forEach(k=>{if(!ib[k])out.push(`Inconsistência reaberta: ${ia[k].label||k}`);});
   new Set([...Object.keys(a.people),...Object.keys(b.people)]).forEach(n=>{if(JSON.stringify(a.people[n])!==JSON.stringify(b.people[n]))out.push(`Terceiros alterados: ${n}`);});
   return out;
+}
+// Operações (inclusão/alteração/exclusão) com valor, para a notificação por e-mail
+function opsData(a,b){
+  const ops=[];const A=new Map(a.purchases.map(p=>[p.id,p])),B=new Map(b.purchases.map(p=>[p.id,p]));const pd=p=>`${p.loja} (${fD(p.data)}) em ${p.parcelas}x`;
+  B.forEach((p,id)=>{const o=A.get(id);if(!o)ops.push({acao:"Inclusão",tipo:"compra",desc:pd(p),valor:p.total,anexo:!!p.anexos?.length});else if(JSON.stringify(o)!==JSON.stringify(p))ops.push({acao:"Alteração",tipo:"compra",desc:pd(p),valor:p.total,anterior:o.total!==p.total?o.total:null,anexo:(p.anexos||[]).length>(o.anexos||[]).length});});
+  A.forEach((p,id)=>{if(!B.has(id))ops.push({acao:"Exclusão",tipo:"compra",desc:pd(p),valor:p.total});});
+  new Set([...Object.keys(a.baixas),...Object.keys(b.baixas)]).forEach(m=>{const o=a.baixas[m]||[],n=b.baixas[m]||[];if(JSON.stringify(o)===JSON.stringify(n))return;
+    const bd=x=>`Fatura ${m}, pago em ${fD(x.date)}`;
+    if(o.length===n.length){n.forEach((x,i)=>{if(JSON.stringify(x)!==JSON.stringify(o[i]))ops.push({acao:"Alteração",tipo:"baixa",desc:bd(x),valor:x.amount,anterior:o[i].amount!==x.amount?o[i].amount:null,anexo:(x.anexos||[]).length>(o[i].anexos||[]).length});});return;}
+    const cnt={};o.forEach(x=>{const k=JSON.stringify(x);cnt[k]=(cnt[k]||0)+1;});
+    n.forEach(x=>{const k=JSON.stringify(x);if(cnt[k])cnt[k]--;else ops.push({acao:"Inclusão",tipo:"baixa",desc:bd(x),valor:x.amount,anexo:!!x.anexos?.length});});
+    Object.entries(cnt).forEach(([k,c])=>{for(let i=0;i<c;i++){const x=JSON.parse(k);ops.push({acao:"Exclusão",tipo:"baixa",desc:bd(x),valor:x.amount});}});});
+  return ops;
+}
+// Envio para o Apps Script que dispara o e-mail ao administrador (configurado em EMAIL_HOOK)
+const EMAIL_HOOK="";const EMAIL_TOKEN="cpc-7f3a9c2e";
+function notifyEmail(ops,who){
+  if(!EMAIL_HOOK||!ops.length)return;
+  try{fetch(EMAIL_HOOK,{method:"POST",mode:"no-cors",headers:{"Content-Type":"text/plain;charset=utf-8"},body:JSON.stringify({token:EMAIL_TOKEN,ambiente:IS_HML?"homologação":"produção",usuario:who,quando:new Date().toISOString(),ops})}).catch(()=>{});}catch{}
 }
 function downloadBackup(data){
   const d=new Date();const ds=`${d.getFullYear()}-${String(d.getMonth()+1).padStart(2,"0")}-${String(d.getDate()).padStart(2,"0")}`;
@@ -517,6 +539,7 @@ function App(){
   const[user,setUser]=useState(null);const[role,setRole]=useState(null);const[authLoading,setAuthLoading]=useState(true);const[authError,setAuthError]=useState(null);
   const[ps,setPs]=useState([]);const[ppl,setPpl]=useState({});const[baixas,setBaixas]=useState({});const[ok,setOk]=useState(false);const[saving,setSaving]=useState(false);const[lastUpdate,setLastUpdate]=useState(null);const[loadErr,setLoadErr]=useState(null);const[history,setHistory]=useState([]);const[incOk,setIncOk]=useState({});
   const[tab,setTab]=useState("dashboard");const[sm,setSm]=useState(cmk());const[sf,setSf]=useState(false);const[ep,setEp]=useState(null);const[sr,setSr]=useState("");const[toast,setToast]=useState(null);
+  CUR_EMAIL=user?.email||"";
   const lojasList=useMemo(()=>[...new Set(ps.map(p=>p.loja))],[ps]);
   const isAdmin=role==="admin";const canEdit=isAdmin||role==="editor";
 
@@ -566,11 +589,11 @@ function App(){
 
   // Gravação automática (só admin): só quando algo mudou de fato, com histórico
   useEffect(()=>{if(!ok||!canEdit)return;const snap=JSON.stringify({purchases:ps,people:ppl,baixas,incOk});if(snap===svRef.current)return;if(tr.current)clearTimeout(tr.current);
-    tr.current=setTimeout(async()=>{tr.current=null;const next={purchases:ps,people:ppl,baixas,incOk};const changes=diffData(baseRef.current,next);setSaving(true);
+    tr.current=setTimeout(async()=>{tr.current=null;const next={purchases:ps,people:ppl,baixas,incOk};const changes=diffData(baseRef.current,next);const ops=opsData(baseRef.current,next);setSaving(true);
       try{
         if(!initFB()){const now=new Date().toISOString();await svLocal({...next,updatedAt:now});svRef.current=snap;baseRef.current=next;setLastUpdate(now);setHistory(h=>changes.length?[...h,{ts:now,user:user.email,changes}]:h);tt("Salvo localmente");return;}
         const r=await saveTx(next,Math.max(revRef.current,0),changes,user.email);
-        revRef.current=r.rev;svRef.current=snap;baseRef.current=next;setLastUpdate(r.now);setHistory(r.hist);tt("Salvo no Firebase ☁");
+        revRef.current=r.rev;svRef.current=snap;baseRef.current=next;setLastUpdate(r.now);setHistory(r.hist);tt("Salvo no Firebase ☁");notifyEmail(ops,user.email);
       }catch(e){
         if(e?.code==="conflict"){tt("Os dados foram alterados em outro dispositivo. Sua última alteração não foi salva; confira e refaça.",6e3);const s2=await initFB().doc(DOC_PATH).get();revRef.current=-1;applyRemote(parseDoc(s2.data()));}
         else tt("Erro ao salvar: "+(e?.code||e?.message||e),6e3);
@@ -680,8 +703,8 @@ function App(){
       {tab==="history"&&<Hist history={history}/>}
     </main>
 
-    {sf&&<Frm lojas={lojasList} onClose={()=>setSf(false)} onSave={p=>{setPs(v=>[...v,{...p,id:Date.now()}]);setSf(false);tt("Compra cadastrada!");}}/>}
-    {ep&&<Frm lojas={lojasList} purchase={ep} onClose={()=>setEp(null)} onSave={p=>{setPs(v=>v.map(x=>x.id===ep.id?{...x,...p}:x));setEp(null);tt("Atualizado!");}}/>}
+    {sf&&<Frm lojas={lojasList} user={user} onClose={()=>setSf(false)} onSave={p=>{setPs(v=>[...v,{...p,id:Date.now()}]);setSf(false);tt("Compra cadastrada!");}}/>}
+    {ep&&<Frm lojas={lojasList} user={user} purchase={ep} onClose={()=>setEp(null)} onSave={p=>{setPs(v=>v.map(x=>x.id===ep.id?{...x,...p}:x));setEp(null);tt("Atualizado!");}}/>}
     {toast&&<div style={{position:"fixed",bottom:20,left:"50%",transform:"translateX(-50%)",background:Z.cd2,border:`1px solid ${Z.bd2}`,borderRadius:9,padding:"8px 18px",fontSize:11,color:Z.ac,animation:"ti .25s ease",zIndex:200,boxShadow:"0 6px 24px rgba(0,0,0,.5)"}}>{toast}</div>}
   </div>);
 }
@@ -692,7 +715,7 @@ function Dash({mt,sm,setSm,cmp,td,ap,am,ps,baixas,setBaixas,isAdmin}){
   const[selLoja,setSelLoja]=useState(null);
   const[showAddBx,setShowAddBx]=useState(false);const[showPrint,setShowPrint]=useState(false);
   const[bxAmt,setBxAmt]=useState("");
-  const[bxDate,setBxDate]=useState("");
+  const[bxFile,setBxFile]=useState(null);const[bxBusy,setBxBusy]=useState(false);const[bxDate,setBxDate]=useState("");
   const[bxErr,setBxErr]=useState({});
 
   const c=mt[sm]||0;const pi=am.indexOf(sm)-1;const pv=pi>=0?(mt[am[pi]]||0):0;const df=pv>0?((c-pv)/pv*100):0;
@@ -714,16 +737,17 @@ function Dash({mt,sm,setSm,cmp,td,ap,am,ps,baixas,setBaixas,isAdmin}){
   };
   const saldoMesAcum=calcAcumDash(sm);
 
-  const addBaixa=()=>{
-    const e={};
+  const addBaixa=async()=>{
+    if(bxBusy)return;const e={};
     const amt=parseMoney(bxAmt);
     if(!bxAmt||amt<=0)e.amt="Valor inválido";
     if(!bxDate)e.date="Informe a data";
     else if(!isValidDate(bxDate))e.date="Data inválida";
     setBxErr(e);
     if(Object.keys(e).length>0)return;
-    setBaixas(prev=>{const updated={...prev};const list=[...(updated[sm]||[]),{amount:amt,date:bxDate}];updated[sm]=list;return updated;});
-    setBxAmt("");setBxDate("");setShowAddBx(false);setBxErr({});
+    let anexos=null;if(bxFile){setBxBusy(true);try{anexos=[await saveAnexo(bxFile,currentUser(),{tipo:"baixa",mes:sm,data:bxDate})];}catch(er){setBxBusy(false);alert("Não foi possível anexar o comprovante: "+(er.message||er));return;}setBxBusy(false);}
+    setBaixas(prev=>{const updated={...prev};const list=[...(updated[sm]||[]),{amount:amt,date:bxDate,...(anexos?{anexos}:{})}];updated[sm]=list;return updated;});
+    setBxAmt("");setBxDate("");setShowAddBx(false);setBxErr({});setBxFile(null);
   };
 
   const removeBaixa=(idx)=>{
@@ -759,12 +783,12 @@ function Dash({mt,sm,setSm,cmp,td,ap,am,ps,baixas,setBaixas,isAdmin}){
         <tbody>{mBaixas.map((b,i)=>(<tr key={i} style={{borderTop:`1px solid ${Z.bd}`}}>
           <td style={{padding:"4px 0",color:Z.tx3}}>{i+1}</td>
           <td style={{padding:"4px 0",textAlign:"right",fontFamily:Z.mn,color:Z.gn}}>{fB(b.amount)}</td>
-          <td style={{padding:"4px 0",textAlign:"right",color:Z.tx3}}>{fD(b.date)}</td>
+          <td style={{padding:"4px 0",textAlign:"right",color:Z.tx3}}>{b.anexos?.length>0&&<span style={{marginRight:5}}><AnexoChips ids={b.anexos} small/></span>}{fD(b.date)}</td>
           <td style={{padding:"4px 0",textAlign:"center"}}>{isAdmin&&<button onClick={()=>removeBaixa(i)} style={{background:"none",border:"none",color:Z.rd,fontSize:10,cursor:"pointer",padding:"2px 4px"}}>✕</button>}</td>
         </tr>))}</tbody>
       </table>)}
       {isAdmin&&(showAddBx?(<div style={{padding:10,background:Z.cd2,borderRadius:8,border:`1px solid ${Z.bd2}`,animation:"fi .15s ease"}}>
-        <ScanButton kind="baixa" onResult={r=>{if(r.valor)setBxAmt(moneyTxt(r.valor));if(r.data)setBxDate(r.data);setBxErr({});}}/>
+        <ScanButton kind="baixa" onFile={setBxFile} onResult={r=>{if(r.valor)setBxAmt(moneyTxt(r.valor));if(r.data)setBxDate(r.data);setBxErr({});}}/>
         <div className="g3f">
           <div><label style={{fontSize:8,color:Z.tx3,display:"block",marginBottom:1}}>Valor (R$)</label>
             <div style={{position:"relative"}}><span style={{position:"absolute",left:6,top:"50%",transform:"translateY(-50%)",fontSize:9,color:Z.tx3}}>R$</span><input value={bxAmt} onChange={e=>{setBxAmt(maskMoney(e.target.value));setBxErr(p=>({...p,amt:undefined}));}} placeholder="0,00" inputMode="decimal" style={{...(bxErr.amt?bxIe:bxIs),paddingLeft:22}}/></div>
@@ -885,6 +909,7 @@ function Purch({ps,setPs,sr,setSr,setEp,isAdmin}){
         <span style={{transform:ie?"rotate(180deg)":"rotate(0)",transition:"transform .2s",color:Z.tx3,fontSize:10}}>▼</span>
       </div>
       {ie&&(<div style={{padding:"0 12px 10px",borderTop:`1px solid ${Z.bd}`,animation:"fi .15s ease"}}>
+        {p.anexos?.length>0&&<div style={{margin:"8px 0 2px"}}><AnexoChips ids={p.anexos}/></div>}
         {isAdmin&&<div style={{display:"flex",gap:5,margin:"8px 0 5px",justifyContent:"flex-end"}}>
           <button onClick={e=>{e.stopPropagation();setEp(p);}} style={{background:Z.bd,color:Z.ac,border:"none",borderRadius:4,padding:"4px 9px",fontSize:9,cursor:"pointer"}}>Editar</button>
           <button onClick={e=>{e.stopPropagation();if(confirm("Excluir?"))setPs(v=>v.filter(x=>x.id!==p.id));}} style={{background:"#1a1015",color:Z.rd,border:"none",borderRadius:4,padding:"4px 9px",fontSize:9,cursor:"pointer"}}>Excluir</button>
@@ -961,22 +986,78 @@ async function getOcr(onProg){
 }
 // reduz fotos grandes (câmera do celular) para acelerar a leitura
 function prepImage(file){return new Promise((ok,err)=>{const img=new Image();img.onload=()=>{const k=Math.min(1,2000/Math.max(img.width,img.height));const c=document.createElement("canvas");c.width=Math.round(img.width*k);c.height=Math.round(img.height*k);const x=c.getContext("2d");x.filter="grayscale(1) contrast(1.3)";x.drawImage(img,0,0,c.width,c.height);URL.revokeObjectURL(img.src);ok(c);};img.onerror=()=>err(new Error("Imagem inválida"));img.src=URL.createObjectURL(file);});}
+
+// ─── ANEXOS (comprovantes): guardados no Firestore em partes, em data/{amb}/anexos/{id}/partes/{n} ───
+const ANX_CHUNK=700000;const ANX_MAX=8*1024*1024;const anxLocal={};
+const newAid=()=>"a"+Date.now().toString(36)+Math.random().toString(36).slice(2,7);
+function blobToB64(b){return new Promise((ok,err)=>{const r=new FileReader();r.onload=()=>ok(String(r.result).split(",")[1]);r.onerror=()=>err(new Error("Falha ao ler o arquivo"));r.readAsDataURL(b);});}
+function b64ToBlob(b64,tipo){const bin=atob(b64);const u=new Uint8Array(bin.length);for(let i=0;i<bin.length;i++)u[i]=bin.charCodeAt(i);return new Blob([u],{type:tipo});}
+// fotos são reduzidas (lado maior 1600 px, JPEG) para caber bem na base
+function compressImage(file){return new Promise((ok,err)=>{const img=new Image();img.onload=()=>{const k=Math.min(1,1600/Math.max(img.width,img.height));const c=document.createElement("canvas");c.width=Math.round(img.width*k);c.height=Math.round(img.height*k);c.getContext("2d").drawImage(img,0,0,c.width,c.height);URL.revokeObjectURL(img.src);c.toBlob(b=>b?ok(b):err(new Error("Falha ao comprimir")),"image/jpeg",.78);};img.onerror=()=>err(new Error("Imagem inválida"));img.src=URL.createObjectURL(file);});}
+async function saveAnexo(file,who,ref){
+  const isImg=(file.type||"").startsWith("image/");const blob=isImg?await compressImage(file):file;const tipo=isImg?"image/jpeg":(file.type||"application/pdf");
+  if(blob.size>ANX_MAX)throw new Error("arquivo maior que 8 MB");
+  const b64=await blobToB64(blob);const parts=[];for(let i=0;i<b64.length;i+=ANX_CHUNK)parts.push(b64.slice(i,i+ANX_CHUNK));
+  const aid=newAid();const meta={nome:file.name||"comprovante",tipo,tamanho:blob.size,partes:parts.length,criadoEm:new Date().toISOString(),criadoPor:who||"",ref:ref||null};
+  const fdb=initFB();if(!fdb){anxLocal[aid]={meta,b64};return aid;}
+  for(let i=0;i<parts.length;i++)await fdb.doc(`${DOC_PATH}/anexos/${aid}/partes/${i}`).set({d:parts[i]});
+  await fdb.doc(`${DOC_PATH}/anexos/${aid}`).set(meta);
+  return aid;
+}
+async function loadAnexo(aid){
+  const fdb=initFB();if(!fdb){const x=anxLocal[aid];if(!x)throw new Error("anexo não encontrado");return{meta:x.meta,blob:b64ToBlob(x.b64,x.meta.tipo)};}
+  const m=await fdb.doc(`${DOC_PATH}/anexos/${aid}`).get();if(!m.exists)throw new Error("anexo não encontrado");const meta=m.data();
+  let b64="";for(let i=0;i<meta.partes;i++){const p=await fdb.doc(`${DOC_PATH}/anexos/${aid}/partes/${i}`).get();b64+=p.data().d;}
+  return{meta,blob:b64ToBlob(b64,meta.tipo)};
+}
+function AnexoViewer({aid,onClose}){
+  const[st,setSt]=useState({load:true});
+  useEffect(()=>{let url=null;loadAnexo(aid).then(r=>{url=URL.createObjectURL(r.blob);setSt({meta:r.meta,url});}).catch(e=>setSt({err:String(e.message||e)}));return()=>{if(url)URL.revokeObjectURL(url);};},[aid]);
+  const btn={background:Z.cd2,color:Z.tx,border:`1px solid ${Z.bd}`,borderRadius:6,padding:"7px 12px",fontSize:11,cursor:"pointer",fontFamily:Z.ft,textDecoration:"none"};
+  return ReactDOM.createPortal(<div onClick={onClose} style={{position:"fixed",inset:0,background:"rgba(0,0,0,.85)",zIndex:400,display:"flex",flexDirection:"column",alignItems:"center",justifyContent:"center",padding:14,fontFamily:Z.ft}}>
+    <div onClick={e=>e.stopPropagation()} style={{background:Z.cd,border:`1px solid ${Z.bd2}`,borderRadius:10,padding:12,maxWidth:"min(760px,100%)",width:"100%",maxHeight:"92vh",display:"flex",flexDirection:"column",gap:8}}>
+      <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",gap:8,flexWrap:"wrap"}}>
+        <div style={{fontSize:11,color:Z.tx2,minWidth:0,overflow:"hidden",textOverflow:"ellipsis"}}>{st.meta?<><b style={{color:Z.tx}}>{st.meta.nome}</b> · {(st.meta.tamanho/1024).toFixed(0)} KB · enviado em {new Date(st.meta.criadoEm).toLocaleString("pt-BR",{day:"2-digit",month:"2-digit",year:"numeric",hour:"2-digit",minute:"2-digit"})}{st.meta.criadoPor?` por ${st.meta.criadoPor}`:""}</>:"Comprovante"}</div>
+        <div style={{display:"flex",gap:6}}>{st.url&&<a href={st.url} download={st.meta.nome} style={btn}>Baixar</a>}{st.url&&<a href={st.url} target="_blank" rel="noopener" style={btn}>Abrir</a>}<button onClick={onClose} style={btn}>Fechar</button></div>
+      </div>
+      <div style={{flex:1,overflow:"auto",display:"flex",justifyContent:"center",background:Z.bg,borderRadius:6,minHeight:200}}>
+        {st.load&&<div style={{color:Z.tx2,fontSize:12,alignSelf:"center"}}>Carregando…</div>}
+        {st.err&&<div style={{color:Z.rd,fontSize:12,alignSelf:"center"}}>Não foi possível abrir: {st.err}</div>}
+        {st.url&&(st.meta.tipo.startsWith("image/")?<img src={st.url} style={{maxWidth:"100%",objectFit:"contain"}}/>:<object data={st.url} type={st.meta.tipo} style={{width:"100%",height:"70vh"}}><div style={{color:Z.tx2,fontSize:12,padding:20}}>Use "Abrir" ou "Baixar" para ver o PDF.</div></object>)}
+      </div>
+    </div>
+  </div>,document.body);
+}
+function AnexoChips({ids,small}){
+  const[v,setV]=useState(null);if(!ids||!ids.length)return null;
+  return(<><span style={{display:"inline-flex",gap:4,flexWrap:"wrap",verticalAlign:"middle"}}>{ids.map((a,i)=>(<button key={a} title="Ver comprovante" onClick={e=>{e.stopPropagation();setV(a);}} style={{background:`${Z.ac3}25`,color:Z.ac,border:`1px solid ${Z.ac3}50`,borderRadius:4,padding:small?"0 4px":"2px 7px",fontSize:small?9:10,cursor:"pointer",fontFamily:Z.ft}}>📎{small?"":` Comprovante${ids.length>1?" "+(i+1):""}`}</button>))}</span>{v&&<AnexoViewer aid={v} onClose={()=>setV(null)}/>}</>);
+}
+// PDF: usa o texto embutido (exato); se for digitalizado, renderiza a 1ª página e lê por OCR
+async function getPdfJs(){const b=ocrBase()+"pdf/";if(typeof pdfjsLib==="undefined")await loadScript(b+"pdf.min.js");pdfjsLib.GlobalWorkerOptions.workerSrc=b+"pdf.worker.min.js";return pdfjsLib;}
+async function pdfToTextOrCanvas(file){
+  const lib=await getPdfJs();const doc=await lib.getDocument({data:new Uint8Array(await file.arrayBuffer())}).promise;
+  let text="";for(let i=1;i<=Math.min(doc.numPages,2);i++){const pg=await doc.getPage(i);const tc=await pg.getTextContent();let lastY=null;for(const it of tc.items){const y=Math.round(it.transform[5]);text+=(lastY!==null&&Math.abs(y-lastY)>2?"\n":(text&&!text.endsWith("\n")?" ":""))+it.str;lastY=y;}text+="\n";}
+  if(text.replace(/\s/g,"").length>=30)return{text};
+  const pg=await doc.getPage(1);const vp=pg.getViewport({scale:2});const c=document.createElement("canvas");c.width=vp.width;c.height=vp.height;await pg.render({canvasContext:c.getContext("2d"),viewport:vp}).promise;return{canvas:c};
+}
 const SCAN_LABELS={valor:"valor",data:"data",parcelas:"parcelas",loja:"loja"};
-function ScanButton({kind,lojas,onResult}){
-  const[st,setSt]=useState(null);const[prog,setProg]=useState(0);const[res,setRes]=useState(null);const[txt,setTxt]=useState("");const[show,setShow]=useState(false);const[thumb,setThumb]=useState(null);
+function ScanButton({kind,lojas,onResult,onFile}){
+  const[st,setSt]=useState(null);const[prog,setProg]=useState(0);const[res,setRes]=useState(null);const[txt,setTxt]=useState("");const[show,setShow]=useState(false);const[thumb,setThumb]=useState(null);const[fname,setFname]=useState("");
   const ref=useRef(null);
   const want=kind==="baixa"?["valor","data"]:["loja","valor","parcelas","data"];
-  const go=async f=>{if(!f)return;setSt("lendo");setProg(0);setRes(null);setThumb(URL.createObjectURL(f));
-    try{const c=await prepImage(f);const w=await getOcr(setProg);const{data}=await w.recognize(c);const r=parseReceipt(data.text,kind,lojas);setTxt(data.text);setRes(r);setSt("ok");onResult(r);}
+  const go=async f=>{if(!f)return;const isPdf=f.type==="application/pdf"||/\.pdf$/i.test(f.name);setSt("lendo");setProg(0);setRes(null);setThumb(isPdf?null:URL.createObjectURL(f));setFname(f.name);if(onFile)onFile(f);
+    try{let text;if(isPdf){const r=await pdfToTextOrCanvas(f);if(r.text)text=r.text;else{const w=await getOcr(setProg);text=(await w.recognize(r.canvas)).data.text;}}else{const c=await prepImage(f);const w=await getOcr(setProg);text=(await w.recognize(c)).data.text;}
+      const r=parseReceipt(text,kind,lojas);setTxt(text);setRes(r);setSt("ok");onResult(r);}
     catch(e){setSt("erro");setTxt(String(e?.message||e));}};
   const lidos=res?want.filter(k=>res[k]!=null):[];const faltam=res?want.filter(k=>res[k]==null):[];
   return(<div style={{marginBottom:10}}>
-    <input ref={ref} type="file" accept="image/*" style={{display:"none"}} onChange={e=>{go(e.target.files[0]);e.target.value="";}}/>
-    <button type="button" onClick={()=>ref.current.click()} disabled={st==="lendo"} style={{width:"100%",background:`${Z.ac3}20`,color:Z.ac,border:`1px dashed ${Z.ac3}80`,borderRadius:6,padding:"8px 10px",fontSize:11,fontWeight:600,cursor:st==="lendo"?"wait":"pointer",fontFamily:Z.ft}}>{st==="lendo"?`Lendo a imagem… ${Math.round(prog*100)}%`:"📷 Preencher a partir de foto do comprovante"}</button>
+    <input ref={ref} type="file" accept="image/*,application/pdf" style={{display:"none"}} onChange={e=>{go(e.target.files[0]);e.target.value="";}}/>
+    <button type="button" onClick={()=>ref.current.click()} disabled={st==="lendo"} style={{width:"100%",background:`${Z.ac3}20`,color:Z.ac,border:`1px dashed ${Z.ac3}80`,borderRadius:6,padding:"8px 10px",fontSize:11,fontWeight:600,cursor:st==="lendo"?"wait":"pointer",fontFamily:Z.ft}}>{st==="lendo"?`Lendo a imagem… ${Math.round(prog*100)}%`:"📷 Anexar comprovante (foto ou PDF) e preencher"}</button>
     {st&&st!=="lendo"&&(<div style={{display:"flex",gap:8,marginTop:6,alignItems:"flex-start"}}>
-      {thumb&&<img src={thumb} style={{width:44,height:44,objectFit:"cover",borderRadius:4,border:`1px solid ${Z.bd2}`,flexShrink:0}}/>}
+      {thumb?<img src={thumb} style={{width:44,height:44,objectFit:"cover",borderRadius:4,border:`1px solid ${Z.bd2}`,flexShrink:0}}/>:<div style={{width:44,height:44,borderRadius:4,border:`1px solid ${Z.bd2}`,display:"flex",alignItems:"center",justifyContent:"center",fontSize:10,color:Z.tx2,flexShrink:0}}>PDF</div>}
       <div style={{fontSize:10,lineHeight:1.5,flex:1}}>
-        {st==="erro"&&<div style={{color:Z.rd}}>Não foi possível ler a imagem ({txt}). Preencha manualmente.</div>}
+        {onFile&&<div style={{color:Z.tx2}}>📎 {fname} será anexado ao salvar.</div>}
+        {st==="erro"&&<div style={{color:Z.rd}}>Não foi possível ler o arquivo ({txt}). Preencha manualmente; o arquivo será anexado mesmo assim.</div>}
         {st==="ok"&&<>
           {lidos.length>0&&<div style={{color:Z.gn}}>Preenchido pela imagem: {lidos.map(k=>SCAN_LABELS[k]).join(", ")}. <b>Confira antes de salvar.</b></div>}
           {faltam.length>0&&<div style={{color:Z.yl}}>Não identificado: {faltam.map(k=>SCAN_LABELS[k]).join(", ")}. Preencha manualmente.</div>}
@@ -989,7 +1070,8 @@ function ScanButton({kind,lojas,onResult}){
 }
 const moneyTxt=v=>maskMoney(v.toFixed(2).replace(".",","));
 
-function Frm({purchase:pu,onClose,onSave,lojas}){
+function Frm({purchase:pu,onClose,onSave,lojas,user}){
+  const[file,setFile]=useState(null);const[busy,setBusy]=useState(false);
   const initTotal=pu?.total?maskMoney(pu.total.toFixed(2).replace(".",",")):"";
   const[lj,setLj]=useState(pu?.loja||"");
   const[tt,setTt]=useState(initTotal);
@@ -1008,11 +1090,13 @@ function Frm({purchase:pu,onClose,onSave,lojas}){
     setErrors(e);return Object.keys(e).length===0;
   };
 
-  const go=()=>{
-    if(!validate())return;
+  const go=async()=>{
+    if(!validate()||busy)return;
     const tv=parseMoney(tt);const pv=parseInt(pc)||1;const vp=Math.round((tv/pv)*100)/100;
     const si=MO.indexOf(startM);const m={};for(let i=0;i<pv&&si+i<MO.length;i++)m[MO[si+i]]=vp;
-    onSave({loja:lj.trim(),total:tv,parcelas:pv,data:dt||null,monthly:m});
+    let anexos=pu?.anexos||[];
+    if(file){setBusy(true);try{anexos=[...anexos,await saveAnexo(file,user?.email,{tipo:"compra",loja:lj.trim(),data:dt})];}catch(e){setBusy(false);alert("Não foi possível anexar o comprovante: "+(e.message||e));return;}}
+    onSave({loja:lj.trim(),total:tv,parcelas:pv,data:dt||null,monthly:m,...(anexos.length?{anexos}:{})});
   };
 
   const is={width:"100%",background:Z.cd2,border:`1px solid ${Z.bd}`,borderRadius:6,padding:"8px 10px",color:Z.tx,fontSize:12,boxSizing:"border-box",fontFamily:Z.ft};
@@ -1023,7 +1107,8 @@ function Frm({purchase:pu,onClose,onSave,lojas}){
   return(<div onClick={onClose} style={{position:"fixed",inset:0,background:"rgba(0,0,0,.75)",display:"flex",alignItems:"center",justifyContent:"center",zIndex:100,backdropFilter:"blur(5px)"}}>
     <div onClick={e=>e.stopPropagation()} className="modal-inner" style={{background:Z.cd,border:`1px solid ${Z.bd2}`,borderRadius:13,padding:22,width:"90%",maxWidth:400,animation:"fi .2s ease"}}>
       <h2 style={{margin:"0 0 16px",fontSize:15,fontWeight:600}}>{pu?"Editar Compra":"Nova Compra"}</h2>
-      <ScanButton kind="compra" lojas={lojas} onResult={r=>{if(r.loja)setLj(r.loja);if(r.valor)setTt(moneyTxt(r.valor));if(r.parcelas)setPc(String(r.parcelas));if(r.data)setDt(r.data);setErrors({});}}/>
+      {pu?.anexos?.length>0&&<div style={{fontSize:10,color:Z.tx2,marginBottom:8}}>Comprovantes desta compra: <AnexoChips ids={pu.anexos}/></div>}
+      <ScanButton kind="compra" lojas={lojas} onFile={setFile} onResult={r=>{if(r.loja)setLj(r.loja);if(r.valor)setTt(moneyTxt(r.valor));if(r.parcelas)setPc(String(r.parcelas));if(r.data)setDt(r.data);setErrors({});}}/>
       <div style={{display:"flex",flexDirection:"column",gap:10}}>
         <div><label style={{fontSize:10,color:Z.tx3,display:"block",marginBottom:2}}>Loja</label><input value={lj} onChange={e=>{setLj(e.target.value);setErrors(p=>({...p,lj:undefined}));}} placeholder="Nome da loja" style={errors.lj?ie:is}/>{errors.lj&&<div style={eStyle}>{errors.lj}</div>}</div>
         <div className="g2f">
@@ -1050,7 +1135,7 @@ function Frm({purchase:pu,onClose,onSave,lojas}){
       </div>
       <div style={{display:"flex",gap:7,marginTop:16,justifyContent:"flex-end"}}>
         <button onClick={onClose} style={{background:Z.bd,color:Z.tx,border:"none",borderRadius:6,padding:"8px 16px",fontSize:11,cursor:"pointer"}}>Cancelar</button>
-        <button onClick={go} style={{background:`linear-gradient(135deg,${Z.ac3},${Z.ac2})`,color:"#fff",border:"none",borderRadius:6,padding:"8px 16px",fontSize:11,fontWeight:600,cursor:"pointer"}}>Salvar</button>
+        <button onClick={go} disabled={busy} style={{background:`linear-gradient(135deg,${Z.ac3},${Z.ac2})`,color:"#fff",border:"none",borderRadius:6,padding:"8px 16px",fontSize:11,fontWeight:600,cursor:busy?"wait":"pointer",opacity:busy?.7:1}}>{busy?"Enviando comprovante…":"Salvar"}</button>
       </div>
     </div>
   </div>);
@@ -1143,7 +1228,7 @@ function BaixasView({baixas,setBaixas,mt,am,isAdmin}){
   const[selM,setSelM]=useState(cmk());
   const[showAdd,setShowAdd]=useState(false);
   const[bAmt,setBAmt]=useState("");
-  const[bDate,setBDate]=useState("");
+  const[bFile,setBFile]=useState(null);const[bBusy,setBBusy]=useState(false);const[bDate,setBDate]=useState("");
   const[bErr,setBErr]=useState({});
   const[editIdx,setEditIdx]=useState(null);
   const[editAmt,setEditAmt]=useState("");
@@ -1174,22 +1259,23 @@ function BaixasView({baixas,setBaixas,mt,am,isAdmin}){
   };
   const saldoAcum=calcAcum(selM);
 
-  const addBx=()=>{
-    const e={};
+  const addBx=async()=>{
+    if(bBusy)return;const e={};
     const amt=parseMoney(bAmt);
     if(!bAmt||amt<=0)e.amt="Valor inválido";
     if(!bDate)e.date="Informe a data";
     else if(!isValidDate(bDate))e.date="Data inválida";
     setBErr(e);
     if(Object.keys(e).length>0)return;
-    setBaixas(prev=>{const u={...prev};u[selM]=[...(u[selM]||[]),{amount:amt,date:bDate}];return u;});
-    setBAmt("");setBDate("");setShowAdd(false);setBErr({});
+    let anexos=null;if(bFile){setBBusy(true);try{anexos=[await saveAnexo(bFile,currentUser(),{tipo:"baixa",mes:selM,data:bDate})];}catch(er){setBBusy(false);alert("Não foi possível anexar o comprovante: "+(er.message||er));return;}setBBusy(false);}
+    setBaixas(prev=>{const u={...prev};u[selM]=[...(u[selM]||[]),{amount:amt,date:bDate,...(anexos?{anexos}:{})}];return u;});
+    setBAmt("");setBDate("");setShowAdd(false);setBErr({});setBFile(null);
   };
 
   const remBx=(idx)=>{setBaixas(prev=>{const u={...prev};const l=[...(u[selM]||[])];l.splice(idx,1);u[selM]=l;return u;});};
   const startEdit=(idx)=>{const b=mBx[idx];setEditIdx(idx);setEditAmt(maskMoney(b.amount.toFixed(2).replace(".",",")));setEditDate(b.date?fD(b.date):"");};
   const cancelEdit=()=>{setEditIdx(null);setEditAmt("");setEditDate("");};
-  const saveEdit=()=>{const amt=parseMoney(editAmt);if(amt<=0)return;const dt=editDate&&editDate.length===10&&isValidDate(editDate)?editDate:null;setBaixas(prev=>{const u={...prev};const l=[...(u[selM]||[])];l[editIdx]={amount:amt,date:dt||l[editIdx].date};u[selM]=l;return u;});cancelEdit();};
+  const saveEdit=()=>{const amt=parseMoney(editAmt);if(amt<=0)return;const dt=editDate&&editDate.length===10&&isValidDate(editDate)?editDate:null;setBaixas(prev=>{const u={...prev};const l=[...(u[selM]||[])];l[editIdx]={...l[editIdx],amount:amt,date:dt||l[editIdx].date};u[selM]=l;return u;});cancelEdit();};
 
   // Histórico: ignorar os 4 primeiros meses (sem dados), ordenar desc
   const skipMonths=new Set(["Abril/2023","Maio/2023","Junho/2023","Julho/2023"]);
@@ -1219,7 +1305,7 @@ function BaixasView({baixas,setBaixas,mt,am,isAdmin}){
 
       {isAdmin&&showAdd&&(<div style={{padding:12,background:Z.cd2,borderRadius:8,border:`1px solid ${Z.bd2}`,marginBottom:12,animation:"fi .15s ease"}}>
         <div style={{fontSize:10,fontWeight:600,color:Z.ac,marginBottom:8}}>Registrar Baixa — {selM}</div>
-        <ScanButton kind="baixa" onResult={r=>{if(r.valor)setBAmt(moneyTxt(r.valor));if(r.data)setBDate(r.data);setBErr({});}}/>
+        <ScanButton kind="baixa" onFile={setBFile} onResult={r=>{if(r.valor)setBAmt(moneyTxt(r.valor));if(r.data)setBDate(r.data);setBErr({});}}/>
         <div className="g3f">
           <div><label style={{fontSize:9,color:Z.tx3,display:"block",marginBottom:2}}>Valor (R$)</label>
             <div style={{position:"relative"}}><span style={{position:"absolute",left:7,top:"50%",transform:"translateY(-50%)",fontSize:10,color:Z.tx3}}>R$</span><input value={bAmt} onChange={e=>{setBAmt(maskMoney(e.target.value));setBErr(p=>({...p,amt:undefined}));}} placeholder="0,00" inputMode="decimal" style={{...(bErr.amt?ie:is),paddingLeft:24}}/></div>
@@ -1247,7 +1333,7 @@ function BaixasView({baixas,setBaixas,mt,am,isAdmin}){
         </tr>):(<tr key={i} style={{borderTop:`1px solid ${Z.bd}`,cursor:isAdmin?"pointer":"default"}} onDoubleClick={()=>isAdmin&&startEdit(i)}>
           <td style={{padding:"6px 0",color:Z.tx3}}>{i+1}</td>
           <td style={{padding:"6px 0",textAlign:"right",fontFamily:Z.mn,color:Z.gn,fontWeight:600}}>{fB(b.amount)}</td>
-          <td style={{padding:"6px 0",textAlign:"right",color:Z.tx3}}>{b.date?fD(b.date):"—"}</td>
+          <td style={{padding:"6px 0",textAlign:"right",color:Z.tx3}}>{b.anexos?.length>0&&<span style={{marginRight:5}}><AnexoChips ids={b.anexos} small/></span>}{b.date?fD(b.date):"—"}</td>
           <td style={{padding:"6px 0",textAlign:"center"}}>{isAdmin&&<button onClick={()=>remBx(i)} style={{background:"none",border:"none",color:Z.rd,fontSize:11,cursor:"pointer",padding:"2px 4px"}}>✕</button>}</td>
         </tr>))}</tbody>
         <tfoot><tr style={{borderTop:`2px solid ${Z.bd2}`}}>

@@ -1,0 +1,166 @@
+# CPC – Modelo de dados
+
+Banco: **Cloud Firestore**, projeto Firebase `cartao-491a2`.
+Cada ambiente é um documento da coleção `data`; os dados financeiros ficam em campos desse
+documento (gravados como texto JSON) e os comprovantes em uma subcoleção.
+
+| Ambiente | Documento | Site |
+|---|---|---|
+| Produção | `data/main` | https://dkovags.github.io/controle-cartao/ |
+| Homologação | `data/homolog` | https://dkovags.github.io/controle-cartao/homolog/ |
+
+## Diagrama
+
+```mermaid
+erDiagram
+    AMBIENTE ||--o{ COMPRA : "purchases"
+    AMBIENTE ||--o{ BAIXA : "baixas (por mês de fatura)"
+    AMBIENTE ||--o{ TERCEIRO : "people"
+    AMBIENTE ||--o{ ALTERACAO : "history"
+    AMBIENTE ||--o{ TRATAMENTO : "incOk"
+    AMBIENTE ||--o{ ANEXO : "subcoleção anexos"
+    ANEXO ||--|{ PARTE : "subcoleção partes"
+    COMPRA }o--o{ ANEXO : "anexos[]"
+    BAIXA }o--o{ ANEXO : "anexos[]"
+
+    AMBIENTE {
+        string purchases "JSON: Compra[]"
+        string baixas "JSON: { mes: Baixa[] }"
+        string people "JSON: { nome: Terceiro[] }"
+        string history "JSON: Alteracao[] (últimas 500)"
+        string incOk "JSON: { chave: Tratamento }"
+        string updatedAt "ISO 8601, última alteração real"
+        int rev "versão, sobe 1 a cada gravação"
+    }
+    COMPRA {
+        number id "timestamp (ms) da criação; 1..119 nos registros antigos"
+        string data "data da compra dd/mm/aaaa (antigos: dd/mm/aa ou null)"
+        string loja
+        number total "valor total da compra"
+        int parcelas
+        map monthly "{ 'Mês/AAAA': valor da parcela }"
+        array anexos "ids de ANEXO (opcional)"
+    }
+    BAIXA {
+        number amount "valor pago"
+        string date "data do pagamento dd/mm/aaaa"
+        array anexos "ids de ANEXO (opcional)"
+    }
+    TERCEIRO {
+        string item
+        number total
+        array payments "[{ month, amount, date }]"
+        number remaining
+    }
+    ALTERACAO {
+        string ts "ISO 8601"
+        string user "e-mail de quem alterou"
+        array changes "descrições em texto"
+    }
+    TRATAMENTO {
+        string by "e-mail de quem marcou"
+        string ts "ISO 8601"
+        string label "categoria e item"
+    }
+    ANEXO {
+        string nome "nome do arquivo enviado"
+        string tipo "image/jpeg ou application/pdf"
+        number tamanho "bytes"
+        int partes "quantidade de PARTE"
+        string criadoEm "ISO 8601"
+        string criadoPor "e-mail"
+        map ref "{ tipo: compra|baixa, loja?, mes?, data? }"
+    }
+    PARTE {
+        string d "conteúdo em base64 (até 700.000 caracteres)"
+    }
+```
+
+## Documento do ambiente (`data/main`, `data/homolog`)
+
+| Campo | Tipo gravado | Conteúdo |
+|---|---|---|
+| `purchases` | texto (JSON) | lista de **Compra** |
+| `baixas` | texto (JSON) | objeto cujas chaves são meses de fatura (`"Outubro/2026"`) e os valores, listas de **Baixa** |
+| `people` | texto (JSON) | objeto cujas chaves são nomes de pessoas e os valores, listas de **Terceiro** (aba hoje oculta) |
+| `history` | texto (JSON) | lista de **Alteração**, da mais antiga para a mais recente; guarda as 500 últimas |
+| `incOk` | texto (JSON) | objeto de inconsistências marcadas como tratadas (chave → **Tratamento**) |
+| `updatedAt` | texto | data e hora (ISO 8601, UTC) da última alteração real dos dados |
+| `rev` | inteiro | versão do documento; a gravação só é aceita se ninguém gravou antes (controle de concorrência) |
+
+Os campos são gravados como texto JSON por compatibilidade com a versão original do app.
+
+### Compra
+
+```json
+{ "id": 1792101424257, "data": "14/10/2026", "loja": "Bem Mulher", "total": 29940.63,
+  "parcelas": 6,
+  "monthly": { "Outubro/2026": 4990.11, "Novembro/2026": 4990.11, "Dezembro/2026": 4990.11,
+               "Janeiro/2027": 4990.11, "Fevereiro/2027": 4990.11, "Março/2027": 4990.11 },
+  "anexos": ["amvbeugg98xrzo"] }
+```
+
+- `monthly` usa como chave o **mês da fatura** (competência = mês do pagamento), no formato `Mês/AAAA` com o nome do mês em português.
+- Regra de lançamento: compra feita até o dia 18 cai na fatura do próprio mês; a partir do dia 19 (fechamento), na do mês seguinte.
+- Compra com entrada (ex.: Iphone) tem um mês a mais que `parcelas`, com o primeiro valor diferente dos demais.
+
+### Baixa (pagamento)
+
+```json
+{ "amount": 5750, "date": "13/10/2026", "anexos": ["amvbeuimc3jhdo"] }
+```
+
+Fica na lista do mês da fatura a que o pagamento se refere (`baixas["Outubro/2026"]`).
+
+### Alteração (histórico)
+
+```json
+{ "ts": "2026-10-16T13:20:05.112Z", "user": "kelianeserra@gmail.com",
+  "changes": ["Nova baixa em Outubro/2026: R$ 5.750,00 (13/10/2026) com comprovante"] }
+```
+
+### Tratamento de inconsistência (`incOk`)
+
+Chave: `"<categoria>|<referência>"`, por exemplo `"Parcelas × meses lançados|p51"` (compra id 51)
+ou `"Possível baixa duplicada|Agosto/2024|14/08/2024|3000"` (mês, data e valor da baixa).
+
+```json
+{ "Parcelas × meses lançados|p51": { "by": "kovags@gmail.com", "ts": "2026-10-16T13:04:00Z",
+  "label": "Parcelas × meses lançados: Cheiro de Menina (07/05/2024) – id 51" } }
+```
+
+As inconsistências em si não são gravadas: são recalculadas pelo app a partir dos dados.
+
+## Comprovantes (subcoleção `anexos`)
+
+| Caminho | Conteúdo |
+|---|---|
+| `data/{amb}/anexos/{aid}` | metadados do **Anexo** |
+| `data/{amb}/anexos/{aid}/partes/{n}` | **Parte** `n` (0, 1, 2…) do arquivo em base64 |
+
+- Fotos são reduzidas (lado maior 1.600 px, JPEG) antes de gravar; PDFs são gravados como enviados (até 8 MB).
+- O arquivo é dividido em partes porque cada documento do Firestore aceita no máximo 1 MiB.
+- A compra ou baixa guarda os ids em `anexos`; ao excluir o registro, o anexo é mantido (auditoria).
+
+## Perfis de acesso
+
+Definidos em `ROLES` (`src/index.html`) e nas regras `firestore.rules`.
+
+| Perfil | Quem | Pode |
+|---|---|---|
+| `admin` | kovags@gmail.com | tudo, inclusive Backup, Exportar e Inconsistências |
+| `editor` | kelianeserra@gmail.com | consultar, incluir, alterar e excluir compras e baixas, anexar comprovantes |
+| `viewer` | (ninguém hoje) | apenas consultar |
+
+## Notificação por e-mail
+
+A cada gravação com inclusão, alteração ou exclusão, o app envia as operações para um
+Google Apps Script (`email/Code.gs`), que manda o e-mail ao administrador. Não há dados
+gravados para isso. Formato enviado:
+
+```json
+{ "token": "…", "ambiente": "produção", "usuario": "kelianeserra@gmail.com",
+  "quando": "2026-10-16T13:20:05Z",
+  "ops": [ { "acao": "Inclusão", "tipo": "baixa", "desc": "Fatura Outubro/2026, pago em 13/10/2026",
+             "valor": 5750, "anterior": null, "anexo": true } ] }
+```

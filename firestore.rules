@@ -14,6 +14,18 @@ service cloud.firestore {
     match /data/{docId} {
       allow read:  if docId in ['main', 'homolog'] && (isAdmin() || isEditor() || isViewer());
       allow write: if docId in ['main', 'homolog'] && (isAdmin() || isEditor());
+
+      // Comprovantes anexados (metadados) e suas partes (conteúdo em base64)
+      match /anexos/{aid} {
+        allow read:   if isAdmin() || isEditor() || isViewer();
+        allow create: if isAdmin() || isEditor();
+        allow delete: if isAdmin();
+        match /partes/{n} {
+          allow read:   if isAdmin() || isEditor() || isViewer();
+          allow create: if isAdmin() || isEditor();
+          allow delete: if isAdmin();
+        }
+      }
     }
 
     // Qualquer outro caminho: bloqueado
