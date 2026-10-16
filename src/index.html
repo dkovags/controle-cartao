@@ -305,7 +305,57 @@ function findIncons(ps,baixas){
   names.forEach(a=>{if(used.has(a))return;const g=names.filter(b=>b!==a&&!used.has(b)&&similarNames(a,b));if(g.length){[a,...g].forEach(x=>used.add(x));add("Atenção","Nomes de loja parecidos",[a,...g].join(" / "),"Podem ser a mesma loja escrita de formas diferentes.",[a,...g].join("/"));}});
   return[...out.filter(i=>i.sev==="Erro"),...out.filter(i=>i.sev!=="Erro")];
 }
-function IncSheet({items}){
+// Análise automática de cada inconsistência: o que provavelmente ocorreu e o que fazer
+function explainIncon(it,ps,baixas){
+  const kp=it.key.slice(it.cat.length+1);const r2=v=>Math.round(v*100)/100;
+  const prov=m=>r2(ps.reduce((s,p)=>s+(p.monthly[m]||0),0));const pago=m=>r2((baixas[m]||[]).reduce((s,b)=>s+b.amount,0));
+  const nxt=(m,k)=>MO[mIdx(m)+k];const lst=a=>a.length>1?a.slice(0,-1).join(", ")+" e "+a[a.length-1]:a[0]||"";
+  const P=kp.startsWith("p")?ps.find(p=>String(p.id)===kp.slice(1)):null;
+  if(P){
+    const k=Object.keys(P.monthly).sort((a,b)=>mIdx(a)-mIdx(b));const n=k.length;const vals=k.map(m=>P.monthly[m]);const soma=r2(vals.reduce((s,v)=>s+v,0));
+    const vp=r2(P.total/(P.parcelas||1));const out=[];
+    const irmas=ps.filter(x=>x.id!==P.id&&x.loja===P.loja);
+    const moda=(()=>{const c={};irmas.forEach(x=>{c[x.parcelas]=(c[x.parcelas]||0)+1;});const e=Object.entries(c).sort((a,b)=>b[1]-a[1])[0];return e&&e[1]>=2?{n:+e[0],q:e[1]}:null;})();
+    const mesmoDia=irmas.filter(x=>x.data&&x.data===P.data);
+    if(it.cat==="Parcelas × meses lançados"||it.cat==="Soma das parcelas × total"){
+      if(n<P.parcelas){
+        const falt=[];for(let i=1;i<=P.parcelas-n;i++)falt.push(nxt(k[n-1],i));
+        out.push(`Foram lançadas ${n} de ${P.parcelas} parcelas. ${falt.length>1?"Faltam":"Falta"} ${falt.length} parcela${falt.length>1?"s":""} de ${fB(vp)}, que ${falt.length>1?"cairiam":"cairia"} em ${lst(falt)}; por isso os meses somam ${fB(soma)} e não ${fB(P.total)}.`);
+        falt.forEach(m=>{const sd=r2(pago(m)-prov(m));out.push(sd>=vp-1?`Em ${m} as baixas superam a provisão em ${fB(sd)}, o que é compatível com essa parcela ter sido cobrada e paga.`:`Em ${m} as baixas ${sd>=0?`superam a provisão em só ${fB(sd)}`:`ficaram ${fB(-sd)} abaixo da provisão`}, o que não indica pagamento dessa parcela.`);});
+        if(moda)out.push(`As demais compras nesta loja costumam ser em ${moda.n}x (${moda.q} compras)${moda.n===P.parcelas?", o que reforça que faltou lançar":""}.`);
+        out.push(`O que fazer: confira a fatura de ${lst(falt)}. Se a parcela aparece, lance-a; se não, ajuste a compra para ${n} parcelas com total de ${fB(soma)}.`);
+      }else if(n>P.parcelas){
+        const ent=n===P.parcelas+1&&vals.slice(1).every(v=>v===vals[1])&&vals[0]!==vals[1];
+        const extra=k.slice(P.parcelas);
+        out.push(`Há ${n} meses lançados para ${P.parcelas} parcelas: ${extra.length>1?"os meses":"o mês"} ${lst(extra)} ${extra.length>1?"excedem":"excede"} o parcelamento, somando ${fB(soma)} contra um total de ${fB(P.total)}.`);
+        if(Math.abs(P.parcelas*vals[0]-P.total)<=.1&&!ent)out.push(`O total registrado corresponde exatamente a ${P.parcelas} × ${fB(vals[0])}, o que sugere lançamento a mais.`);
+        extra.forEach(m=>{const sd=r2(pago(m)-prov(m));if(Math.abs(sd)<.01)out.push(`Por outro lado, as baixas de ${m} fecham exatamente com a provisão contando essa parcela. Isso pode indicar que ela foi cobrada, ou apenas que o pagamento seguiu o valor mostrado pelo sistema.`);});
+        if(mesmoDia.length)out.push(`No mesmo dia há outra compra nesta loja (${mesmoDia.map(x=>`${fB(x.total)} em ${x.parcelas}x`).join("; ")}); vale conferir se não houve troca entre elas.`);
+        out.push(`O que fazer: confira a fatura de ${lst(extra)}. Se a parcela não aparece, retire ${extra.length>1?"esses meses":"esse mês"}; se aparece, ajuste para ${n} parcelas com total de ${fB(soma)}.`);
+      }else{
+        out.push(`O número de parcelas confere, mas os valores mensais somam ${fB(soma)} em vez de ${fB(P.total)} (diferença de ${fB(Math.abs(soma-P.total))}). Provável erro de digitação no total ou em algum valor mensal.`);
+      }
+      return out.join(" ");
+    }
+    if(it.cat==="Meses fora de sequência"){const gaps=[];k.forEach((m,i)=>{if(i)for(let j=mIdx(k[i-1])+1;j<mIdx(m);j++)gaps.push(MO[j]);});return`A sequência de parcelas pula ${lst(gaps)}. Normalmente as parcelas caem em meses seguidos; provavelmente uma parcela foi lançada no mês errado. O que fazer: confira na fatura em que meses as parcelas foram cobradas.`;}
+    if(it.cat==="Valor inválido")return"Há parcela com valor zero ou negativo, o que não ocorre numa compra parcelada. Provável erro de digitação; corrija o valor ou exclua o mês.";
+    if(it.cat==="Compra sem data"){const f=k[0];const q=pmk(f);const pm=q.month?q.month:12,py=q.month?q.year:q.year-1;const d2=x=>String(x).padStart(2,"0");return`Lançamento antigo, importado da planilha, sem a data da compra. Pela regra de fechamento (dia 19), a primeira parcela em ${f} indica compra feita aproximadamente entre 19/${d2(pm)}/${py} e 18/${d2(q.month+1)}/${q.year}. Não afeta os valores; se tiver o comprovante, informe a data, ou marque como tratada.`;}
+    if(it.cat==="Data da compra inválida")return`A data "${P.data}" não está no formato dd/mm/aaaa (provável erro de digitação, como barra faltando). Não afeta os valores, mas atrapalha a ordenação. O que fazer: corrija a data na compra.`;
+  }
+  const bm=/^(.+?\/\d{4})\|(.*)\|(-?[\d.]+)$/.exec(kp);
+  if(bm){const[,m,date,amt]=bm;const v=+amt;
+    if(it.cat==="Possível baixa duplicada"){const q=(baixas[m]||[]).filter(b=>b.date===date&&b.amount===v).length;const sd=r2(pago(m)-prov(m));
+      return`Há ${q} baixas de ${fB(v)} em ${fD(date)} na fatura de ${m}. As baixas do mês somam ${fB(pago(m))} para uma provisão de ${fB(prov(m))} (${sd>=0?`excedente de ${fB(sd)}`:`faltam ${fB(-sd)}`}). ${sd>=v-.01?`Como o excedente cobre um desses pagamentos, é provável que um deles esteja repetido.`:`Como o mês não ficou com excedente desse valor, provavelmente foram dois pagamentos distintos no mesmo dia.`} O que fazer: confira no extrato e exclua a repetida, ou marque como tratada.`;}
+    if(it.cat==="Baixa fora do período da fatura"){const d=date.split("/");const inv=`${d[1]}/${d[0]}/${d[2]}`;const ok=x=>{const p=x.split("/");const j=mIdx(`${MN[+p[1]-1]}/${p[2]}`);return j===mIdx(m)||j===mIdx(m)-1;};
+      const sug=(+d[1]<=12&&+d[0]<=12&&ok(inv))?`Com dia e mês invertidos (${inv}) a data cairia no período, então é provável inversão.`:ok(`${d[0]}/${d[1]}/${+d[2]-1}`)?`Com o ano anterior (${d[0]}/${d[1]}/${+d[2]-1}) a data cairia no período, então é provável erro no ano.`:"Pode ter sido lançada na fatura errada.";
+      return`O pagamento de ${fB(v)} em ${date} está fora do período usual da fatura de ${m} (mês anterior ou o próprio mês). ${sug} O que fazer: corrija a data ou mova a baixa para a fatura certa.`;}
+    if(it.cat==="Data de baixa inválida")return`A data "${date}" não está no formato dd/mm/aaaa. Provável erro de digitação; corrija a data da baixa.`;
+    if(it.cat==="Valor inválido")return`Baixa com valor ${fB(v)}, o que não representa um pagamento. Corrija o valor ou exclua a baixa.`;
+  }
+  if(it.cat==="Nomes de loja parecidos"){const ns=kp.split("/");return`Nomes encontrados: ${ns.map(x=>`${x} (${ps.filter(p=>p.loja===x).length} compra${ps.filter(p=>p.loja===x).length!==1?"s":""})`).join(", ")}. Se forem a mesma loja, unifique o nome para os relatórios e o ranking somarem corretamente; se não, marque como tratada.`;}
+  return"";
+}
+function IncSheet({items,ps,baixas}){
   const cats=[...new Set(items.map(i=>i.cat))];
   return(<>
     <SheetHead title="Relatório de inconsistências"/>
@@ -313,7 +363,7 @@ function IncSheet({items}){
     {items.length>0&&<div style={{fontSize:11,color:"#333",marginBottom:12}}>{items.filter(i=>i.sev==="Erro").length} erro(s) e {items.filter(i=>i.sev==="Atenção").length} ponto(s) de atenção.</div>}
     {cats.map(c=>{const l=items.filter(i=>i.cat===c);return(<div key={c} style={{marginBottom:16,breakInside:"avoid"}}>
       <div style={{fontSize:13,fontWeight:700,marginBottom:4}}>{c} <span style={{fontWeight:400,color:"#555"}}>({l.length}) – {l[0].sev}</span></div>
-      <table style={{width:"100%",borderCollapse:"collapse"}}><tbody>{l.map((i,k)=>(<tr key={k}><td style={{...pTd,width:"38%",fontWeight:600}}>{i.title}</td><td style={pTd}>{i.detail}</td></tr>))}</tbody></table>
+      <table style={{width:"100%",borderCollapse:"collapse"}}><tbody>{l.map((i,k)=>{const ex=ps?explainIncon(i,ps,baixas):"";return(<tr key={k} style={{breakInside:"avoid"}}><td style={{...pTd,width:"34%",fontWeight:600}}>{i.title}</td><td style={pTd}>{i.detail}{ex&&<div style={{marginTop:5,padding:"6px 8px",background:"#f4f1fb",borderLeft:"3px solid #7c3aed",fontSize:10.5,lineHeight:1.45,color:"#222"}}><b>Análise automática:</b> {ex}</div>}</td></tr>);})}</tbody></table>
     </div>);})}
   </>);
 }
@@ -341,7 +391,7 @@ function Relat({ps,baixas,mt,am}){
 // Aba Inconsistências (só admin): seleção para impressão e marcação de tratadas
 function Incons({ps,baixas,incOk,setIncOk,user}){
   const all=useMemo(()=>findIncons(ps,baixas),[ps,baixas]);
-  const[filtro,setFiltro]=useState("pend");const[sel,setSel]=useState({});const[open,setOpen]=useState(false);
+  const[filtro,setFiltro]=useState("pend");const[sel,setSel]=useState({});const[exp,setExp]=useState({});const[open,setOpen]=useState(false);
   const pend=all.filter(i=>!incOk[i.key]);const trat=all.filter(i=>incOk[i.key]);
   const list=filtro==="pend"?pend:filtro==="trat"?trat:all;
   const selList=all.filter(i=>sel[i.key]);
@@ -368,11 +418,13 @@ function Incons({ps,baixas,incOk,setIncOk,user}){
       <div style={{flex:1,minWidth:0}}>
         <div style={{display:"flex",gap:6,alignItems:"center",flexWrap:"wrap"}}><span style={{fontSize:9,fontWeight:700,padding:"1px 6px",borderRadius:4,background:i.sev==="Erro"?`${Z.rd}25`:`${Z.yl}25`,color:i.sev==="Erro"?Z.rd:Z.yl}}>{i.sev}</span><span style={{color:Z.tx2}}>{i.cat}</span><span style={{marginLeft:"auto"}}><label style={{display:"flex",alignItems:"center",gap:5,fontSize:10,color:ok?Z.gn:Z.tx2,cursor:"pointer",whiteSpace:"nowrap",padding:"2px 0"}}><input type="checkbox" checked={!!ok} onChange={()=>toggleOk(i)} style={{width:15,height:15,accentColor:Z.gn}}/>Tratada</label></span></div>
         <div style={{marginTop:3,color:Z.tx,fontWeight:500}}>{i.title}</div><div style={{color:Z.tx2,marginTop:1}}>{i.detail}</div>
+        <button onClick={()=>setExp(e=>({...e,[i.key]:!e[i.key]}))} style={{background:"none",border:"none",color:Z.ac,fontSize:10,padding:"3px 0 0",cursor:"pointer",fontFamily:Z.ft}}>{exp[i.key]?"▾ Ocultar análise":"▸ Ver análise"}</button>
+        {exp[i.key]&&<div style={{marginTop:4,padding:"7px 9px",background:Z.cd2,borderLeft:`3px solid ${Z.ac3}`,borderRadius:4,color:Z.tx,fontSize:10.5,lineHeight:1.5}}>{explainIncon(i,ps,baixas)}</div>}
         {ok&&<div style={{color:Z.gn,fontSize:10,marginTop:3}}>Tratada em {fmt(ok.ts)}{ok.by?` por ${ok.by}`:""}</div>}
       </div>
     </div>);})}
     {!list.length&&<div style={{fontSize:11,color:Z.gn,padding:"8px 0"}}>{filtro==="trat"?"Nenhuma inconsistência tratada ainda.":"Nenhuma inconsistência pendente."}</div>}
-    {open&&<PrintShell onClose={()=>setOpen(false)}><IncSheet items={selList}/></PrintShell>}
+    {open&&<PrintShell onClose={()=>setOpen(false)}><IncSheet items={selList} {...{ps,baixas}}/></PrintShell>}
   </div>);
 }
 
