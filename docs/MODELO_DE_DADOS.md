@@ -155,8 +155,10 @@ Definidos em `ROLES` (`src/index.html`) e nas regras `firestore.rules`.
 ## Notificação por e-mail
 
 A cada gravação com inclusão, alteração ou exclusão, o app envia as operações para um
-Google Apps Script (`email/Code.gs`), que manda o e-mail ao administrador. Não há dados
-gravados para isso. Formato enviado:
+Google Apps Script (`email/Code.gs`). O script guarda-as numa fila (Propriedades do script);
+a primeira operação abre uma janela de 8 horas e, ao fim dela, um gatilho de tempo envia
+todas as operações do período num único e-mail ao administrador. Nada disso é gravado no
+Firestore. Formato enviado pelo app:
 
 ```json
 { "token": "…", "ambiente": "produção", "usuario": "kelianeserra@gmail.com",
