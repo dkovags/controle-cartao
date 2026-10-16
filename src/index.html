@@ -229,7 +229,7 @@ function PrintShell({controls,onClose,children}){
       <div style={{display:"flex",alignItems:"center",gap:10,flexWrap:"wrap"}}>{controls}</div>
       <div style={{display:"flex",gap:6}}><button onClick={()=>window.print()} style={{...btn,background:`linear-gradient(135deg,${Z.ac3},${Z.ac2})`,color:"#fff"}}>Imprimir</button><button onClick={onClose} style={{...btn,background:Z.cd2,color:Z.tx2,border:`1px solid ${Z.bd}`}}>Fechar</button></div>
     </div>
-    <div className="print-sheet" style={{maxWidth:760,margin:"0 auto",background:"#fff",color:"#111",borderRadius:6,padding:"clamp(14px,4vw,30px)",fontFamily:"Arial,Helvetica,sans-serif"}}>{children}</div>
+    <div className="print-sheet" style={{WebkitPrintColorAdjust:"exact",printColorAdjust:"exact",maxWidth:760,margin:"0 auto",background:"#fff",color:"#111",borderRadius:6,padding:"clamp(14px,4vw,30px)",fontFamily:"Arial,Helvetica,sans-serif"}}>{children}</div>
   </div>,document.body);
 }
 function SheetHead({title}){
@@ -264,7 +264,7 @@ function MonthSheet({sm,ps,baixas,mt,showL,showB,incErr}){
       <tr><td style={{padding:"3px 10px",fontWeight:700,borderTop:"1px solid #333"}}>{tb-tot>=0?"Saldo do mês":"Falta pagar"}</td><td style={{padding:"3px 0",fontWeight:700,borderTop:"1px solid #333",...pR}}>{fB(Math.abs(tb-tot))}</td></tr>
       {incErr&&(()=>{const net=incErr.reduce((s,x)=>s+x.x.v,0);const adj=tb-tot+net;return(<>
         <tr><td style={{padding:"3px 10px"}}>Inconsistências (erros)</td><td style={{padding:"3px 0",...pR,color:Math.abs(net)<.005?"#111":vCor(net)}}>{net>=0?"+":"−"} {fB(Math.abs(net))}</td></tr>
-        <tr><td style={{padding:"3px 10px",fontWeight:700,borderTop:"1px solid #333"}}>{adj>=0?"Saldo considerando inconsistências":"Falta pagar considerando inconsistências"}</td><td style={{padding:"3px 0",fontWeight:700,borderTop:"1px solid #333",...pR}}>{fB(Math.abs(adj))}</td></tr>
+        <tr style={{background:adj>=0?"#e8f5ec":"#fdecea"}}><td style={{padding:"8px 10px",fontWeight:700,fontSize:13,borderTop:`2px solid ${vCor(adj>=0?1:-1)}`,borderBottom:`2px solid ${vCor(adj>=0?1:-1)}`,color:vCor(adj>=0?1:-1)}}>{adj>=0?"Saldo considerando inconsistências":"Falta pagar considerando inconsistências"}</td><td style={{padding:"8px 10px",fontWeight:800,fontSize:15,borderTop:`2px solid ${vCor(adj>=0?1:-1)}`,borderBottom:`2px solid ${vCor(adj>=0?1:-1)}`,color:vCor(adj>=0?1:-1),...pR}}>{fB(Math.abs(adj))}</td></tr>
       </>);})()}
     </tbody></table>)}
     {incErr&&(<div style={{marginTop:24,breakInside:"avoid"}}>
