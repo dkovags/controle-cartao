@@ -1,5 +1,7 @@
 # CPC – Modelo de dados
 
+> Documentos: modelo em PDF com diagrama entidade-relacionamento (`MODELO_DE_DADOS.pdf`) e dicionário de dados (`DICIONARIO_DE_DADOS.pdf` e `DICIONARIO_DE_DADOS.csv`), nesta mesma pasta.
+
 Banco: **Cloud Firestore**, projeto Firebase `cartao-491a2`.
 Cada ambiente é um documento da coleção `data`; os dados financeiros ficam em campos desse
 documento (gravados como texto JSON) e os comprovantes em uma subcoleção.

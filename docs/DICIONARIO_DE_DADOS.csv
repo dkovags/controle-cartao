@@ -1,0 +1,68 @@
+﻿Entidade;Atributo;Nome lógico;Tipo;Formato / domínio;Obrigatório;Chave;Padrão;Exemplo;Regras e validações
+AMBIENTE;id;Identificador do ambiente;texto (id do documento);main | homolog;sim;PK;—;main;"Fixo; definido pelo endereço do site (/homolog/ usa homolog)."
+AMBIENTE;purchases;Compras;texto (JSON de lista);lista de COMPRA;sim;—;[];[{…}];Gravado inteiro a cada alteração.
+AMBIENTE;baixas;Baixas;texto (JSON de objeto);"{ ""Mês/AAAA"": [BAIXA] }";sim;—;{};"{""Outubro/2026"":[…]}";Chave = mês da fatura.
+AMBIENTE;people;Terceiros;texto (JSON de objeto);{ nome: [TERCEIRO] };sim;—;{};"{""Kelly"":[…]}";Aba oculta no app.
+AMBIENTE;history;Histórico;texto (JSON de lista);lista de ALTERACAO;sim;—;[];[{…}];"Guarda as 500 últimas; as mais antigas são descartadas."
+AMBIENTE;incOk;Inconsistências tratadas;texto (JSON de objeto);{ chave: TRATAMENTO };não;—;{};"{""…|p51"":{…}}";Só o admin altera pelo app.
+AMBIENTE;corr;Correções decididas;texto (JSON de objeto);{ pacote: DECISAO_CORRECAO };não;—;{};"{""2026-10-17-teste-na"":{…}}";Só o admin decide pelo app.
+AMBIENTE;updatedAt;Última alteração;texto;ISO 8601 UTC;sim;—;—;2026-10-17T16:29:13.118Z;Atualizado só quando os dados mudam de fato.
+AMBIENTE;rev;Versão do documento;inteiro;≥ 0;sim;—;0;42;"Incrementado a cada gravação; gravação recusada se outro aparelho gravou antes (conflito)."
+COMPRA;id;Identificador da compra;número inteiro;milissegundos desde 1970 (ou 1–119 nos registros importados);sim;PK;Date.now() na inclusão;1792101424257;"Único no ambiente; não muda."
+COMPRA;data;Data da compra;texto;dd/mm/aaaa (antigos: dd/mm/aa);não (sim na inclusão pelo app);—;—;14/10/2026;"Data válida; define o mês da 1ª parcela (fechamento dia 19)."
+COMPRA;loja;Loja;texto;livre, nome padronizado;sim;—;—;Bem Mulher;"Não vazio; variações do mesmo nome são apontadas em Inconsistências."
+COMPRA;total;Valor total;número;reais, 2 casas decimais;sim;—;—;29940.63;"> 0; deve ser igual à soma das parcelas (exceto entrada)."
+COMPRA;parcelas;Número de parcelas;número inteiro;1 a 48;sim;—;1;6;Igual à quantidade de PARCELA (ou +1 quando há entrada).
+COMPRA;monthly;Parcelas por mês;objeto;"{ ""Mês/AAAA"": valor }";sim;—;gerado pelo app;"{""Outubro/2026"":4990.11}";Ver entidade PARCELA.
+COMPRA;anexos;Comprovantes;lista de texto;ids de ANEXO;não;FK;—;"[""amvbeugg98xrzo""]";Cada id deve existir em data/{amb}/anexos.
+PARCELA;(chave);Mês da fatura;texto;Mês/AAAA, mês por extenso em português, com acento;sim;PK;—;Março/2027;"Competência = mês do pagamento; meses em sequência, sem lacunas."
+PARCELA;(valor);Valor da parcela;número;reais, 2 casas decimais;sim;—;total ÷ parcelas;4990.11;> 0.
+BAIXA;(mês);Fatura paga;texto (chave do objeto baixas);Mês/AAAA;sim;PK;mês selecionado na tela;Outubro/2026;Competência da fatura a que o pagamento se refere.
+BAIXA;(ordem);Posição na lista;inteiro (implícito);0, 1, 2…;sim;PK;fim da lista;3;Ordem de registro.
+BAIXA;amount;Valor pago;número;reais, 2 casas decimais;sim;—;—;5750;> 0.
+BAIXA;date;Data do pagamento;texto;dd/mm/aaaa;sim;—;—;13/10/2026;"Data válida; esperada no mês da fatura ou no anterior."
+BAIXA;anexos;Comprovantes;lista de texto;ids de ANEXO;não;FK;—;"[""amvbeuimc3jhdo""]";—
+TERCEIRO;(nome);Pessoa;texto (chave do objeto people);livre;sim;PK;—;Kelly;—
+TERCEIRO;item;Item;texto;livre;sim;PK;—;Cama;—
+TERCEIRO;total;Valor total;número;reais;sim;—;—;2493.39;> 0.
+TERCEIRO;payments;Pagamentos recebidos;lista de objeto;PAGAMENTO_TERCEIRO;sim;—;[];[{…}];—
+TERCEIRO;remaining;Saldo a receber;número;reais;sim;—;total;0;≥ 0.
+PAGAMENTO_TERCEIRO;month;Referência;texto;Mês/AAAA ou rótulo livre (ex.: Baixa 1);sim;—;—;Julho/2024;—
+PAGAMENTO_TERCEIRO;amount;Valor recebido;número;reais;sim;—;—;249.39;> 0.
+PAGAMENTO_TERCEIRO;date;Data do recebimento;texto;dd/mm/aaaa;não;—;—;17/07/2024;—
+ALTERACAO;ts;Data e hora;texto;ISO 8601 UTC;sim;PK;momento da gravação;2026-10-16T13:20:05.112Z;—
+ALTERACAO;user;Autor;texto;e-mail;sim;FK → USUARIO;usuário logado;kelianeserra@gmail.com;"Correções feitas pelo Claude aparecem como ""Claude (a pedido de …)""."
+ALTERACAO;changes;Mudanças;lista de texto;frases geradas pelo app;sim;—;—;"[""Nova baixa em Outubro/2026: R$ 5.750,00 (13/10/2026)""]";Uma linha por inclusão, alteração ou exclusão.
+TRATAMENTO;(chave);Inconsistência;texto;"categoria|referência; referência = p{id da compra}, {Mês/AAAA}|{data}|{valor} ou nomes de lojas";sim;PK;—;Parcelas × meses lançados|p51;Gerada pelo app a partir da inconsistência.
+TRATAMENTO;by;Quem tratou;texto;e-mail;sim;FK → USUARIO;usuário logado;kovags@gmail.com;—
+TRATAMENTO;ts;Quando;texto;ISO 8601 UTC;sim;—;momento da marcação;2026-10-16T13:04:00Z;—
+TRATAMENTO;label;Descrição;texto;categoria: título;sim;—;—;Parcelas × meses lançados: Cheiro de Menina…;Usada no histórico.
+DECISAO_CORRECAO;(chave);Pacote;texto;id do arquivo em correcoes/;sim;PK;—;2026-10-17-teste-na;—
+DECISAO_CORRECAO;status;Decisão;texto;aplicada | recusada;sim;—;—;aplicada;Decidida uma única vez.
+DECISAO_CORRECAO;titulo;Título;texto;livre;sim;—;título do pacote;"Teste: loja ""N/A""…";—
+DECISAO_CORRECAO;by;Quem decidiu;texto;e-mail;sim;FK → USUARIO;usuário logado;kovags@gmail.com;Só o administrador.
+DECISAO_CORRECAO;ts;Quando;texto;ISO 8601 UTC;sim;—;momento da decisão;2026-10-17T16:29:12.308Z;—
+ANEXO;(id);Identificador;texto (id do documento);"""a"" + data em base 36 + 5 caracteres aleatórios";sim;PK;gerado pelo app;amvbeugg98xrzo;Único.
+ANEXO;nome;Nome do arquivo;texto;livre;sim;—;nome enviado;compra1.png;—
+ANEXO;tipo;Tipo do arquivo;texto;image/jpeg | application/pdf;sim;—;—;image/jpeg;Fotos são convertidas para JPEG.
+ANEXO;tamanho;Tamanho;número inteiro;bytes;sim;—;—;25638;≤ 8 MB.
+ANEXO;partes;Quantidade de partes;número inteiro;≥ 1;sim;—;—;1;Igual ao número de PARTE_ANEXO.
+ANEXO;criadoEm;Envio;texto;ISO 8601 UTC;sim;—;momento do envio;2026-10-16T20:23:10Z;—
+ANEXO;criadoPor;Quem enviou;texto;e-mail;sim;FK → USUARIO;usuário logado;kelianeserra@gmail.com;—
+ANEXO;ref;Contexto;objeto;{ tipo: compra|baixa, loja?, mes?, data? };não;—;—;"{""tipo"":""baixa"",""mes"":""Outubro/2026""}";"Informativo; a ligação oficial é a lista anexos do registro."
+PARTE_ANEXO;(n);Ordem;texto (id do documento);0, 1, 2…;sim;PK;—;0;Partes remontadas em ordem crescente.
+PARTE_ANEXO;d;Conteúdo;texto;base64, até 700.000 caracteres;sim;—;—;JVBERi0xLjQK…;Cada documento do Firestore aceita até 1 MiB.
+USUARIO;(email);E-mail da conta Google;texto (id do documento);e-mail em minúsculas;sim;PK;—;kelianeserra@gmail.com;Único no ambiente.
+USUARIO;nome;Nome;texto;livre;sim;—;e-mail;Keliane;—
+USUARIO;perfil;Perfil;texto;id de PERFIL;sim;FK → PERFIL;editor;editor;"Perfil precisa existir; o próprio usuário não altera o seu."
+USUARIO;ativo;Ativo;lógico;true | false;sim;—;true;true;Inativo não entra (nem pelo app, nem direto no banco).
+USUARIO;recebeEmail;Recebe e-mail;lógico;true | false;sim;—;false;false;Lido no cadastro da produção pelo script de e-mail.
+USUARIO;criadoEm / criadoPor;Cadastro;texto;ISO 8601 / e-mail;não;—;—;2026-10-16T20:39:30Z / kovags@gmail.com;—
+USUARIO;alteradoEm / alteradoPor;Última edição;texto;ISO 8601 / e-mail;não;—;—;—;—
+PERFIL;(id);Identificador;texto (id do documento);admin | editor | viewer | gerado a partir do nome;sim;PK;—;editor;admin não pode ser excluído nem alterado.
+PERFIL;nome;Nome;texto;livre;sim;—;—;Edição;Único.
+PERFIL;editar;Pode editar;lógico;true | false;sim;—;false;true;"Incluir, alterar e excluir compras e baixas; anexar."
+PERFIL;backup;Pode baixar backup;lógico;true | false;sim;—;false;false;—
+PERFIL;exportar;Pode exportar;lógico;true | false;sim;—;false;false;—
+PERFIL;inconsistencias;Vê inconsistências;lógico;true | false;sim;—;false;false;Menu Inconsistências e valores nos relatórios.
+PERFIL;usuarios;Gere usuários;lógico;true | false;sim;—;false;false;Menu Usuários (inclui perfis).
