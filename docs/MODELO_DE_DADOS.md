@@ -106,6 +106,7 @@ erDiagram
 | `people` | texto (JSON) | objeto cujas chaves são nomes de pessoas e os valores, listas de **Terceiro** (aba hoje oculta) |
 | `history` | texto (JSON) | lista de **Alteração**, da mais antiga para a mais recente; guarda as 500 últimas |
 | `incOk` | texto (JSON) | objeto de inconsistências marcadas como tratadas (chave → **Tratamento**) |
+| `corr` | texto (JSON) | correções do menu **Correções** já decididas: id do pacote → `{ status: aplicada\|recusada, titulo, by, ts }`; os pacotes ficam em `correcoes/` no repositório |
 | `updatedAt` | texto | data e hora (ISO 8601, UTC) da última alteração real dos dados |
 | `rev` | inteiro | versão do documento; a gravação só é aceita se ninguém gravou antes (controle de concorrência) |
 
