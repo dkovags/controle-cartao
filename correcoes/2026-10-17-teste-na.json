@@ -1,0 +1,9 @@
+{
+  "id": "2026-10-17-teste-na",
+  "titulo": "Teste: loja \"N/A\" passa a \"Não informada\"",
+  "descricao": "Pacote de teste do novo menu Correções, só na homologação. A compra de 21/07/2023 (R$ 4.485,09) está com a loja \"N/A\". Aplique para ver o fluxo, ou recuse.",
+  "criadoEm": "2026-10-17T12:00:00Z",
+  "ops": [
+    { "op": "loja.renomear", "de": "N/A", "para": "Não informada" }
+  ]
+}

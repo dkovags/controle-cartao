@@ -97,7 +97,7 @@ const pJ=v=>typeof v==="string"?JSON.parse(v):v;
 function parseDoc(d){
   const baixas=pJ(d.baixas)||{};
   Object.keys(SEED_BX).forEach(m=>{if(!baixas[m])baixas[m]=SEED_BX[m];});
-  return{purchases:pJ(d.purchases)||[],people:pJ(d.people)||{},baixas,updatedAt:d.updatedAt||null,rev:d.rev||0,history:pJ(d.history)||[],incOk:pJ(d.incOk)||{}};
+  return{purchases:pJ(d.purchases)||[],people:pJ(d.people)||{},baixas,updatedAt:d.updatedAt||null,rev:d.rev||0,history:pJ(d.history)||[],incOk:pJ(d.incOk)||{},corr:pJ(d.corr)||{}};
 }
 // Primeiro acesso à homologação: copia os dados da produção
 async function prepDoc(){
@@ -114,7 +114,7 @@ async function saveTx(next,baseRev,changes,who){
     const hist=s.exists?(pJ(s.data().history)||[]):[];const now=new Date().toISOString();
     if(changes.length)hist.push({ts:now,user:who,changes});
     while(hist.length>500)hist.shift();
-    t.set(ref,{purchases:JSON.stringify(next.purchases),people:JSON.stringify(next.people),baixas:JSON.stringify(next.baixas),incOk:JSON.stringify(next.incOk||{}),updatedAt:now,rev:cur+1,history:JSON.stringify(hist)});
+    t.set(ref,{purchases:JSON.stringify(next.purchases),people:JSON.stringify(next.people),baixas:JSON.stringify(next.baixas),incOk:JSON.stringify(next.incOk||{}),corr:JSON.stringify(next.corr||{}),updatedAt:now,rev:cur+1,history:JSON.stringify(hist)});
     return{rev:cur+1,now,hist};
   });
 }
@@ -150,6 +150,7 @@ function diffData(a,b){
   const ia=a.incOk||{},ib=b.incOk||{};
   Object.keys(ib).forEach(k=>{if(!ia[k])out.push(`Inconsistência marcada como tratada: ${ib[k].label||k}`);});
   Object.keys(ia).forEach(k=>{if(!ib[k])out.push(`Inconsistência reaberta: ${ia[k].label||k}`);});
+  const ca=a.corr||{},cb=b.corr||{};Object.keys(cb).forEach(k=>{if(!ca[k])out.unshift(cb[k].status==="aplicada"?`Correção aplicada: ${cb[k].titulo} (preparada pelo Claude)`:`Correção recusada: ${cb[k].titulo} (preparada pelo Claude)`);});
   new Set([...Object.keys(a.people),...Object.keys(b.people)]).forEach(n=>{if(JSON.stringify(a.people[n])!==JSON.stringify(b.people[n]))out.push(`Terceiros alterados: ${n}`);});
   return out;
 }
@@ -621,6 +622,64 @@ function Usuarios({user}){
   </div>);
 }
 
+
+// ─── CORREÇÕES PREPARADAS PELO CLAUDE: pacotes em /correcoes, aplicados pelo admin com um toque ───
+// Cada operação traz o valor esperado ("de"); se o registro mudou desde que o pacote foi preparado, ela fica em conflito.
+const sameFields=(obj,de)=>obj&&Object.keys(de||{}).every(k=>JSON.stringify(obj[k])===JSON.stringify(de[k]));
+function planCorrecao(pk,ps,baixas){
+  let P=ps.map(p=>({...p}));const B=Object.fromEntries(Object.entries(baixas).map(([m,l])=>[m,l.map(x=>({...x}))]));
+  const fmtC=c=>`${c.loja} (${fD(c.data)}) ${fB(c.total)} em ${c.parcelas}x`;const fmtB=b=>`${fB(b.amount)} em ${fD(b.date)}`;
+  const itens=(pk.ops||[]).map(o=>{
+    try{
+      if(o.op==="compra.alterar"){const i=P.findIndex(p=>p.id===o.id);if(i<0||!sameFields(P[i],o.de))return{ok:false,txt:`Compra id ${o.id}`,erro:"registro diferente do esperado"};const antes=fmtC(P[i]);P[i]={...P[i],...o.para};return{ok:true,txt:`Alterar compra id ${o.id}`,antes,depois:fmtC(P[i])+(o.para.monthly?` · meses: ${Object.keys(o.para.monthly).join(", ")}`:"")};}
+      if(o.op==="compra.incluir"){if(P.some(p=>p.id===o.compra.id))return{ok:false,txt:`Incluir compra id ${o.compra.id}`,erro:"já existe"};P.push(o.compra);return{ok:true,txt:"Incluir compra",depois:fmtC(o.compra)};}
+      if(o.op==="compra.excluir"){const i=P.findIndex(p=>p.id===o.id);if(i<0||!sameFields(P[i],o.de))return{ok:false,txt:`Excluir compra id ${o.id}`,erro:"registro diferente do esperado"};const antes=fmtC(P[i]);P.splice(i,1);return{ok:true,txt:`Excluir compra id ${o.id}`,antes};}
+      if(o.op==="loja.renomear"){const n=P.filter(p=>p.loja===o.de).length;if(!n)return{ok:false,txt:`Renomear loja ${o.de}`,erro:"nenhuma compra com esse nome"};P=P.map(p=>p.loja===o.de?{...p,loja:o.para}:p);return{ok:true,txt:`Renomear loja (${n} compra${n>1?"s":""})`,antes:o.de,depois:o.para};}
+      if(o.op==="baixa.alterar"||o.op==="baixa.excluir"){const l=B[o.mes]||[];const i=l.findIndex(x=>sameFields(x,o.de));if(i<0)return{ok:false,txt:`Baixa de ${o.mes}`,erro:"baixa não encontrada como esperado"};const antes=fmtB(l[i]);
+        if(o.op==="baixa.excluir"){l.splice(i,1);return{ok:true,txt:`Excluir baixa de ${o.mes}`,antes};}l[i]={...l[i],...o.para};return{ok:true,txt:`Alterar baixa de ${o.mes}`,antes,depois:fmtB(l[i])};}
+      if(o.op==="baixa.incluir"){(B[o.mes]=B[o.mes]||[]).push(o.baixa);return{ok:true,txt:`Incluir baixa em ${o.mes}`,depois:fmtB(o.baixa)};}
+      return{ok:false,txt:o.op,erro:"operação desconhecida"};
+    }catch(e){return{ok:false,txt:o.op,erro:String(e.message||e)};}
+  });
+  return{itens,ok:itens.length>0&&itens.every(i=>i.ok),ps:P,baixas:B};
+}
+function useCorrecoes(){
+  const[list,setList]=useState(null);
+  useEffect(()=>{const base=new URL(IS_HML?"../correcoes/":"correcoes/",location.href).href;const amb=IS_HML?"homolog":"main";
+    fetch(base+"index.json",{cache:"no-store"}).then(r=>r.ok?r.json():[]).then(async idx=>{const out=[];for(const it of idx){if(it.ambiente&&it.ambiente!=="ambos"&&it.ambiente!==amb)continue;try{const r=await fetch(base+it.arquivo,{cache:"no-store"});if(r.ok)out.push(await r.json());}catch{}}setList(out);}).catch(()=>setList([]));},[]);
+  return list;
+}
+function Correcoes({list,ps,baixas,setPs,setBaixas,corr,setCorr,user,tt}){
+  const[open,setOpen]=useState({});
+  const card={background:Z.cd,border:`1px solid ${Z.bd}`,borderRadius:10,padding:16,marginBottom:14};
+  const btn={background:`linear-gradient(135deg,${Z.ac3},${Z.ac2})`,color:"#fff",border:"none",borderRadius:6,padding:"8px 16px",fontSize:12,fontWeight:600,cursor:"pointer",fontFamily:Z.ft};
+  const btn2={background:Z.cd2,color:Z.tx2,border:`1px solid ${Z.bd}`,borderRadius:6,padding:"8px 14px",fontSize:12,cursor:"pointer",fontFamily:Z.ft};
+  const fmt=t=>new Date(t).toLocaleString("pt-BR",{day:"2-digit",month:"2-digit",year:"numeric",hour:"2-digit",minute:"2-digit"});
+  if(!list)return<div style={card}><div style={{fontSize:11,color:Z.tx2}}>Carregando…</div></div>;
+  const pend=list.filter(k=>!corr[k.id]);const feitas=list.filter(k=>corr[k.id]);
+  const decidir=(k,status,plan)=>{if(status==="aplicada"){if(!confirm(`Aplicar a correção "${k.titulo}"?`))return;setPs(plan.ps);setBaixas(plan.baixas);}
+    else if(!confirm(`Recusar a correção "${k.titulo}"? Ela não será aplicada.`))return;
+    setCorr(c=>({...c,[k.id]:{status,titulo:k.titulo,by:user?.email||"",ts:new Date().toISOString()}}));tt(status==="aplicada"?"Correção aplicada":"Correção recusada");};
+  return(<div>
+    <div style={{fontSize:11,color:Z.tx3,marginBottom:12}}>Correções de dados preparadas pelo Claude. Confira o antes e o depois; nada muda sem a sua aprovação. A correção é gravada com o seu login e registrada no Histórico.</div>
+    {!pend.length&&<div style={card}><div style={{fontSize:12,color:Z.gn}}>Nenhuma correção pendente.</div></div>}
+    {pend.map(k=>{const plan=planCorrecao(k,ps,baixas);return(<div key={k.id} style={{...card,borderColor:plan.ok?`${Z.ac3}80`:Z.rd}}>
+      <div style={{display:"flex",justifyContent:"space-between",gap:8,flexWrap:"wrap"}}><div style={{fontSize:13,fontWeight:600,color:Z.ac}}>{k.titulo}</div><div style={{fontSize:10,color:Z.tx3}}>preparada em {fmt(k.criadoEm)}</div></div>
+      {k.descricao&&<div style={{fontSize:11,color:Z.tx2,margin:"6px 0 10px",lineHeight:1.5}}>{k.descricao}</div>}
+      {plan.itens.map((i,n)=>(<div key={n} style={{padding:"7px 0",borderTop:`1px solid ${Z.bd}`,fontSize:11}}>
+        <div style={{color:i.ok?Z.tx:Z.rd,fontWeight:500}}>{i.ok?"•":"⚠"} {i.txt}{!i.ok&&` – ${i.erro}`}</div>
+        {i.antes&&<div style={{color:Z.rd,marginTop:2}}><span style={{color:Z.tx3}}>antes: </span>{i.antes}</div>}
+        {i.depois&&<div style={{color:Z.gn,marginTop:1}}><span style={{color:Z.tx3}}>depois: </span>{i.depois}</div>}
+      </div>))}
+      {!plan.ok&&<div style={{fontSize:11,color:Z.rd,margin:"8px 0"}}>Os dados mudaram desde que a correção foi preparada. Ela não pode ser aplicada; peça ao Claude para refazê-la ou recuse.</div>}
+      <div style={{display:"flex",gap:8,marginTop:12,justifyContent:"flex-end"}}><button onClick={()=>decidir(k,"recusada")} style={btn2}>Recusar</button><button disabled={!plan.ok} onClick={()=>decidir(k,"aplicada",plan)} style={{...btn,opacity:plan.ok?1:.4,cursor:plan.ok?"pointer":"not-allowed"}}>Aplicar</button></div>
+    </div>);})}
+    {feitas.length>0&&<div style={card}><div style={{fontSize:12,fontWeight:600,color:Z.ac,marginBottom:8}}>Já decididas</div>
+      {feitas.map(k=>(<div key={k.id} style={{fontSize:11,padding:"6px 0",borderTop:`1px solid ${Z.bd}`,display:"flex",justifyContent:"space-between",gap:8,flexWrap:"wrap"}}><span>{k.titulo}</span><span style={{color:corr[k.id].status==="aplicada"?Z.gn:Z.tx3}}>{corr[k.id].status==="aplicada"?"Aplicada":"Recusada"} em {fmt(corr[k.id].ts)} por {corr[k.id].by}</span></div>))}
+    </div>}
+  </div>);
+}
+
 function Hist({history}){
   const[n,setN]=useState(50);const list=[...history].reverse();
   const fmt=t=>new Date(t).toLocaleString("pt-BR",{day:"2-digit",month:"2-digit",year:"numeric",hour:"2-digit",minute:"2-digit"});
@@ -637,11 +696,11 @@ function Hist({history}){
 
 function App(){
   const[user,setUser]=useState(null);const[role,setRole]=useState(null);const[authLoading,setAuthLoading]=useState(true);const[authError,setAuthError]=useState(null);const[access,setAccess]=useState(null);
-  const[ps,setPs]=useState([]);const[ppl,setPpl]=useState({});const[baixas,setBaixas]=useState({});const[ok,setOk]=useState(false);const[saving,setSaving]=useState(false);const[lastUpdate,setLastUpdate]=useState(null);const[loadErr,setLoadErr]=useState(null);const[history,setHistory]=useState([]);const[incOk,setIncOk]=useState({});
+  const[ps,setPs]=useState([]);const[ppl,setPpl]=useState({});const[baixas,setBaixas]=useState({});const[ok,setOk]=useState(false);const[saving,setSaving]=useState(false);const[lastUpdate,setLastUpdate]=useState(null);const[loadErr,setLoadErr]=useState(null);const[history,setHistory]=useState([]);const[incOk,setIncOk]=useState({});const[corr,setCorr]=useState({});
   const[tab,setTab]=useState("dashboard");const[sm,setSm]=useState(cmk());const[sf,setSf]=useState(false);const[ep,setEp]=useState(null);const[sr,setSr]=useState("");const[toast,setToast]=useState(null);
   CUR_EMAIL=user?.email||"";
   const lojasList=useMemo(()=>[...new Set(ps.map(p=>p.loja))],[ps]);
-  const P=access?.perms||{};const isAdmin=access?.perfil==="admin";const canEdit=!!P.editar;
+  const P=access?.perms||{};const corrList=useCorrecoes();const corrPend=(corrList||[]).filter(k=>!corr[k.id]).length;const isAdmin=access?.perfil==="admin";const canEdit=!!P.editar;
 
   // Listen to auth state
   useEffect(()=>{
@@ -667,29 +726,29 @@ function App(){
   const svRef=useRef(null);const baseRef=useRef(null);const revRef=useRef(-1);const tr=useRef(null);
   const applyRemote=(d)=>{
     if(d.rev<=revRef.current)return;
-    revRef.current=d.rev;baseRef.current={purchases:d.purchases,people:d.people,baixas:d.baixas,incOk:d.incOk};
+    revRef.current=d.rev;baseRef.current={purchases:d.purchases,people:d.people,baixas:d.baixas,incOk:d.incOk,corr:d.corr};
     svRef.current=JSON.stringify(baseRef.current);
     if(tr.current){clearTimeout(tr.current);tr.current=null;}
-    setPs(fixTrunc(d.purchases));setPpl(d.people);setBaixas(d.baixas);setIncOk(d.incOk);setHistory(d.history);setLastUpdate(d.updatedAt);setOk(true);
+    setPs(fixTrunc(d.purchases));setPpl(d.people);setBaixas(d.baixas);setIncOk(d.incOk);setCorr(d.corr);setHistory(d.history);setLastUpdate(d.updatedAt);setOk(true);
   };
   useEffect(()=>{if(!user||!role)return;
-    if(!initFB()){(async()=>{const d=await ldLocal();const x=d||{purchases:SEED_P,people:SEED_PPL,baixas:SEED_BX,updatedAt:null,rev:0,history:[],incOk:{}};revRef.current=-1;applyRemote(x);})();return;}
+    if(!initFB()){(async()=>{const d=await ldLocal();const x=d||{purchases:SEED_P,people:SEED_PPL,baixas:SEED_BX,updatedAt:null,rev:0,history:[],incOk:{},corr:{}};revRef.current=-1;applyRemote(x);})();return;}
     let unsub=null,cancel=false;
     (async()=>{try{const ref=await prepDoc();if(cancel)return;
       unsub=ref.onSnapshot(snap=>{
         if(!snap.exists){setLoadErr("Base de dados não encontrada");return;}
         const d=parseDoc(snap.data());
-        if(okRef.current&&d.rev>revRef.current&&JSON.stringify({purchases:d.purchases,people:d.people,baixas:d.baixas,incOk:d.incOk})!==JSON.stringify({purchases:ps0.current,people:ppl0.current,baixas:bx0.current,incOk:inc0.current}))tt("Dados atualizados em outro dispositivo");
+        if(okRef.current&&d.rev>revRef.current&&JSON.stringify({purchases:d.purchases,people:d.people,baixas:d.baixas,incOk:d.incOk,corr:d.corr})!==JSON.stringify({purchases:ps0.current,people:ppl0.current,baixas:bx0.current,incOk:inc0.current,corr:cor0.current}))tt("Dados atualizados em outro dispositivo");
         applyRemote(d);
       },e=>setLoadErr(String(e?.code||e?.message||e)));
     }catch(e){setLoadErr(String(e?.code||e?.message||e));}})();
     return()=>{cancel=true;if(unsub)unsub();};
   },[user,role]);
-  const okRef=useRef(false);okRef.current=ok;const ps0=useRef(ps);ps0.current=ps;const ppl0=useRef(ppl);ppl0.current=ppl;const bx0=useRef(baixas);bx0.current=baixas;const inc0=useRef(incOk);inc0.current=incOk;
+  const okRef=useRef(false);okRef.current=ok;const ps0=useRef(ps);ps0.current=ps;const ppl0=useRef(ppl);ppl0.current=ppl;const bx0=useRef(baixas);bx0.current=baixas;const inc0=useRef(incOk);inc0.current=incOk;const cor0=useRef(corr);cor0.current=corr;
 
   // Gravação automática (só admin): só quando algo mudou de fato, com histórico
-  useEffect(()=>{if(!ok||!canEdit)return;const snap=JSON.stringify({purchases:ps,people:ppl,baixas,incOk});if(snap===svRef.current)return;if(tr.current)clearTimeout(tr.current);
-    tr.current=setTimeout(async()=>{tr.current=null;const next={purchases:ps,people:ppl,baixas,incOk};const changes=diffData(baseRef.current,next);const ops=opsData(baseRef.current,next);setSaving(true);
+  useEffect(()=>{if(!ok||!canEdit)return;const snap=JSON.stringify({purchases:ps,people:ppl,baixas,incOk,corr});if(snap===svRef.current)return;if(tr.current)clearTimeout(tr.current);
+    tr.current=setTimeout(async()=>{tr.current=null;const next={purchases:ps,people:ppl,baixas,incOk,corr};const changes=diffData(baseRef.current,next);const ops=opsData(baseRef.current,next);setSaving(true);
       try{
         if(!initFB()){const now=new Date().toISOString();await svLocal({...next,updatedAt:now});svRef.current=snap;baseRef.current=next;setLastUpdate(now);setHistory(h=>changes.length?[...h,{ts:now,user:user.email,changes}]:h);tt("Salvo localmente");return;}
         const r=await saveTx(next,Math.max(revRef.current,0),changes,user.email);
@@ -698,7 +757,7 @@ function App(){
         if(e?.code==="conflict"){tt("Os dados foram alterados em outro dispositivo. Sua última alteração não foi salva; confira e refaça.",6e3);const s2=await initFB().doc(DOC_PATH).get();revRef.current=-1;applyRemote(parseDoc(s2.data()));}
         else tt("Erro ao salvar: "+(e?.code||e?.message||e),6e3);
       }finally{setSaving(false);}
-    },.8e3);},[ps,ppl,baixas,incOk,ok]);
+    },.8e3);},[ps,ppl,baixas,incOk,corr,ok]);
   const tt=(m,ms=2e3)=>{setToast(m);setTimeout(()=>setToast(null),ms);};
   const am=useMemo(()=>{const s=new Set([cmk()]);ps.forEach(p=>Object.keys(p.monthly).forEach(m=>s.add(m)));Object.keys(baixas).forEach(m=>{if((baixas[m]||[]).length)s.add(m);});return MO.filter(m=>s.has(m));},[ps,baixas]);
   const mt=useMemo(()=>{const t={};am.forEach(m=>{t[m]=0;});ps.forEach(p=>Object.entries(p.monthly).forEach(([m,v])=>{t[m]=(t[m]||0)+v;}));return t;},[ps,am]);
@@ -784,7 +843,7 @@ function App(){
     </header>
 
     <nav style={{display:"flex",gap:1,padding:"0 18px",background:Z.cd,borderBottom:`1px solid ${Z.bd}`,overflowX:"auto",WebkitOverflowScrolling:"touch"}}>
-      {[["dashboard","Dashboard"],["purchases","Compras"],["baixas","Baixas"],/*["people","Terceiros"],*/["reports","Gráficos"],["relatorios","Relatórios"],...(P.inconsistencias?[["incons","Inconsistências"]]:[]),["history","Histórico"],...(P.usuarios?[["usuarios","Usuários"]]:[])].map(([id,lb])=>(<button key={id} onClick={()=>setTab(id)} style={{background:tab===id?Z.cd2:"transparent",color:tab===id?Z.ac:Z.tx2,border:"none",borderBottom:tab===id?`2px solid ${Z.ac2}`:"2px solid transparent",padding:"10px 13px",fontSize:11,fontWeight:500,cursor:"pointer"}}>{lb}</button>))}
+      {[["dashboard","Dashboard"],["purchases","Compras"],["baixas","Baixas"],/*["people","Terceiros"],*/["reports","Gráficos"],["relatorios","Relatórios"],...(P.inconsistencias?[["incons","Inconsistências"]]:[]),["history","Histórico"],...(P.usuarios?[["usuarios","Usuários"]]:[]),...(isAdmin?[["correcoes",corrPend?`Correções (${corrPend})`:"Correções"]]:[])].map(([id,lb])=>(<button key={id} onClick={()=>setTab(id)} style={{background:tab===id?Z.cd2:"transparent",color:tab===id?Z.ac:Z.tx2,border:"none",borderBottom:tab===id?`2px solid ${Z.ac2}`:"2px solid transparent",padding:"10px 13px",fontSize:11,fontWeight:500,cursor:"pointer"}}>{lb}</button>))}
     </nav>
 
     <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",padding:"6px 18px",background:Z.bg,borderBottom:`1px solid ${Z.bd}`,fontSize:10,color:Z.tx3,flexWrap:"wrap",gap:4}}>
@@ -802,6 +861,7 @@ function App(){
       {tab==="incons"&&P.inconsistencias&&<Incons {...{ps,baixas,incOk,setIncOk,user}}/>}
       {tab==="history"&&<Hist history={history}/>}
       {tab==="usuarios"&&P.usuarios&&<Usuarios user={user}/>}
+      {tab==="correcoes"&&isAdmin&&<Correcoes list={corrList} {...{ps,baixas,setPs,setBaixas,corr,setCorr,user,tt}}/>}
     </main>
 
     {sf&&<Frm lojas={lojasList} user={user} onClose={()=>setSf(false)} onSave={p=>{setPs(v=>[...v,{...p,id:Date.now()}]);setSf(false);tt("Compra cadastrada!");}}/>}
