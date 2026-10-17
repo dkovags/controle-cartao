@@ -484,10 +484,10 @@ function Incons({ps,baixas,incOk,setIncOk,user}){
   const[filtro,setFiltro]=useState("pend");const[sev,setSev]=useState("all");const[sel,setSel]=useState({});const[exp,setExp]=useState({});const[open,setOpen]=useState(false);
   const pend=all.filter(i=>!incOk[i.key]);const trat=all.filter(i=>incOk[i.key]);
   const list=(filtro==="pend"?pend:filtro==="trat"?trat:all).filter(i=>sev==="all"||i.sev===sev);
-  const selList=all.filter(i=>sel[i.key]);
-  // ao abrir ou trocar de filtro, a lista exibida vem toda selecionada
-  const listKey=list.map(i=>i.key).join(",");
-  useEffect(()=>{setSel(Object.fromEntries(list.map(i=>[i.key,true])));},[filtro,sev,listKey]);
+  // imprime só o que está selecionado e visível no filtro atual
+  const selList=list.filter(i=>sel[i.key]);
+  // ao abrir ou trocar de filtro, a lista exibida vem toda selecionada; marcar "Tratada" não mexe na seleção
+  useEffect(()=>{setSel(Object.fromEntries(list.map(i=>[i.key,true])));},[filtro,sev]);
   const toggleOk=i=>setIncOk(o=>{const n={...o};if(n[i.key])delete n[i.key];else n[i.key]={by:user?.email||"",ts:new Date().toISOString(),label:`${i.cat}: ${i.title}`};return n;});
   const nErr=pend.filter(i=>i.sev==="Erro").length,nAt=pend.length-nErr;
   const card={background:Z.cd,border:`1px solid ${Z.bd}`,borderRadius:10,padding:16,marginBottom:18};
