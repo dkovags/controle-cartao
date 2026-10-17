@@ -64,7 +64,8 @@ const SEED_BX={"Junho/2023":[{"amount":2000,"date":"25/05/2023"},{"amount":3000,
 const SEED_ACUM={"Agosto/2023":0,"Setembro/2023":0,"Outubro/2023":0,"Novembro/2023":0,"Dezembro/2023":0,"Janeiro/2024":0,"Fevereiro/2024":0,"Março/2024":1073.54,"Abril/2024":-0.04,"Maio/2024":-0.04,"Junho/2024":1335.16,"Julho/2024":1506.61,"Agosto/2024":490.01,"Setembro/2024":1335.16,"Outubro/2024":0,"Novembro/2024":0,"Dezembro/2024":0,"Janeiro/2025":0,"Fevereiro/2025":33.18,"Março/2025":0.01,"Abril/2025":0,"Maio/2025":0.01,"Junho/2025":0.01,"Julho/2025":0.02,"Agosto/2025":255.74,"Setembro/2025":311.47,"Outubro/2025":83.67,"Novembro/2025":5.05,"Dezembro/2025":0.01,"Janeiro/2026":0.60,"Fevereiro/2026":0.57};
 // ─── FIREBASE CONFIG ─────────────────────────────
 const FB_CFG={apiKey:"AIzaSyDjoF7vPKRgXtNhhDyky5GQvfp76vgB99c",authDomain:"cartao-491a2.firebaseapp.com",projectId:"cartao-491a2",storageBucket:"cartao-491a2.firebasestorage.app",messagingSenderId:"967186616580",appId:"1:967186616580:web:27e525936cb5d0d92c4051"};
-const ROLES={"kovags@gmail.com":"admin","kelianeserra@gmail.com":"viewer"};
+// Configuração inicial de acesso: só é usada para criar o cadastro (menu Usuários) no 1º acesso do administrador
+const ROLES={"kovags@gmail.com":"admin","kelianeserra@gmail.com":"editor"};
 let db=null;let fbApp=null;
 function initFB(){
   if(db)return db;
@@ -82,6 +83,8 @@ async function loginGoogle(){
   try{const result=await auth.signInWithPopup(provider);return result.user;}catch(e){console.error("Login error:",e);return null;}
 }
 async function logout(){const auth=getAuth();if(auth)await auth.signOut();}
+let CUR_EMAIL="";
+function currentUser(){try{return getAuth()?.currentUser?.email||CUR_EMAIL;}catch{return CUR_EMAIL;}}
 function getUserRole(email){return ROLES[email]||null;}
 // Homologação (/homolog/) grava em documento separado, sem tocar a produção
 const APP_VERSION="__VERSION__";
@@ -94,7 +97,7 @@ const pJ=v=>typeof v==="string"?JSON.parse(v):v;
 function parseDoc(d){
   const baixas=pJ(d.baixas)||{};
   Object.keys(SEED_BX).forEach(m=>{if(!baixas[m])baixas[m]=SEED_BX[m];});
-  return{purchases:pJ(d.purchases)||[],people:pJ(d.people)||{},baixas,updatedAt:d.updatedAt||null,rev:d.rev||0,history:pJ(d.history)||[],incOk:pJ(d.incOk)||{}};
+  return{purchases:pJ(d.purchases)||[],people:pJ(d.people)||{},baixas,updatedAt:d.updatedAt||null,rev:d.rev||0,history:pJ(d.history)||[],incOk:pJ(d.incOk)||{},corr:pJ(d.corr)||{}};
 }
 // Primeiro acesso à homologação: copia os dados da produção
 async function prepDoc(){
@@ -111,7 +114,7 @@ async function saveTx(next,baseRev,changes,who){
     const hist=s.exists?(pJ(s.data().history)||[]):[];const now=new Date().toISOString();
     if(changes.length)hist.push({ts:now,user:who,changes});
     while(hist.length>500)hist.shift();
-    t.set(ref,{purchases:JSON.stringify(next.purchases),people:JSON.stringify(next.people),baixas:JSON.stringify(next.baixas),incOk:JSON.stringify(next.incOk||{}),updatedAt:now,rev:cur+1,history:JSON.stringify(hist)});
+    t.set(ref,{purchases:JSON.stringify(next.purchases),people:JSON.stringify(next.people),baixas:JSON.stringify(next.baixas),incOk:JSON.stringify(next.incOk||{}),corr:JSON.stringify(next.corr||{}),updatedAt:now,rev:cur+1,history:JSON.stringify(hist)});
     return{rev:cur+1,now,hist};
   });
 }
@@ -126,7 +129,7 @@ async function svLocal(d){try{await window.storage.set("cc-despesas-v10",JSON.st
 function diffData(a,b){
   const out=[];const pd=p=>`${p.loja} (${fD(p.data)})`;
   const A=new Map(a.purchases.map(p=>[p.id,p])),B=new Map(b.purchases.map(p=>[p.id,p]));
-  B.forEach((p,id)=>{if(!A.has(id))out.push(`Nova compra: ${pd(p)} – ${fB(p.total)} em ${p.parcelas}x`);});
+  B.forEach((p,id)=>{if(!A.has(id))out.push(`Nova compra: ${pd(p)} – ${fB(p.total)} em ${p.parcelas}x${p.anexos?.length?" (com comprovante)":""}`);});
   A.forEach((p,id)=>{if(!B.has(id))out.push(`Compra excluída: ${pd(p)} – ${fB(p.total)} em ${p.parcelas}x`);});
   B.forEach((p,id)=>{const o=A.get(id);if(!o||JSON.stringify(o)===JSON.stringify(p))return;const f=[];
     if(o.loja!==p.loja)f.push(`loja ${o.loja} → ${p.loja}`);
@@ -134,8 +137,9 @@ function diffData(a,b){
     if(o.total!==p.total)f.push(`total ${fB(o.total)} → ${fB(p.total)}`);
     if(o.parcelas!==p.parcelas)f.push(`parcelas ${o.parcelas} → ${p.parcelas}`);
     if(JSON.stringify(o.monthly)!==JSON.stringify(p.monthly))f.push(`meses: ${Object.keys(o.monthly).length} → ${Object.keys(p.monthly).length}`);
+    if((p.anexos||[]).length>(o.anexos||[]).length)f.push("comprovante anexado");
     out.push(`Compra alterada: ${pd(o)}${f.length?" – "+f.join("; "):""}`);});
-  const bk=x=>`${fB(x.amount)} (${fD(x.date)})`;
+  const bk=x=>`${fB(x.amount)} (${fD(x.date)})${x.anexos?.length?" com comprovante":""}`;
   new Set([...Object.keys(a.baixas),...Object.keys(b.baixas)]).forEach(m=>{
     const o=a.baixas[m]||[],n=b.baixas[m]||[];if(JSON.stringify(o)===JSON.stringify(n))return;
     if(o.length===n.length){n.forEach((x,i)=>{if(JSON.stringify(x)!==JSON.stringify(o[i]))out.push(`Baixa alterada em ${m}: ${bk(o[i])} → ${bk(x)}`);});return;}
@@ -146,8 +150,28 @@ function diffData(a,b){
   const ia=a.incOk||{},ib=b.incOk||{};
   Object.keys(ib).forEach(k=>{if(!ia[k])out.push(`Inconsistência marcada como tratada: ${ib[k].label||k}`);});
   Object.keys(ia).forEach(k=>{if(!ib[k])out.push(`Inconsistência reaberta: ${ia[k].label||k}`);});
+  const ca=a.corr||{},cb=b.corr||{};Object.keys(cb).forEach(k=>{if(!ca[k])out.unshift(cb[k].status==="aplicada"?`Correção aplicada: ${cb[k].titulo} (preparada pelo Claude)`:`Correção recusada: ${cb[k].titulo} (preparada pelo Claude)`);});
   new Set([...Object.keys(a.people),...Object.keys(b.people)]).forEach(n=>{if(JSON.stringify(a.people[n])!==JSON.stringify(b.people[n]))out.push(`Terceiros alterados: ${n}`);});
   return out;
+}
+// Operações (inclusão/alteração/exclusão) com valor, para a notificação por e-mail
+function opsData(a,b){
+  const ops=[];const A=new Map(a.purchases.map(p=>[p.id,p])),B=new Map(b.purchases.map(p=>[p.id,p]));const pd=p=>`${p.loja} (${fD(p.data)}) em ${p.parcelas}x`;
+  B.forEach((p,id)=>{const o=A.get(id);if(!o)ops.push({acao:"Inclusão",tipo:"compra",desc:pd(p),valor:p.total,anexo:!!p.anexos?.length});else if(JSON.stringify(o)!==JSON.stringify(p))ops.push({acao:"Alteração",tipo:"compra",desc:pd(p),valor:p.total,anterior:o.total!==p.total?o.total:null,anexo:(p.anexos||[]).length>(o.anexos||[]).length});});
+  A.forEach((p,id)=>{if(!B.has(id))ops.push({acao:"Exclusão",tipo:"compra",desc:pd(p),valor:p.total});});
+  new Set([...Object.keys(a.baixas),...Object.keys(b.baixas)]).forEach(m=>{const o=a.baixas[m]||[],n=b.baixas[m]||[];if(JSON.stringify(o)===JSON.stringify(n))return;
+    const bd=x=>`Fatura ${m}, pago em ${fD(x.date)}`;
+    if(o.length===n.length){n.forEach((x,i)=>{if(JSON.stringify(x)!==JSON.stringify(o[i]))ops.push({acao:"Alteração",tipo:"baixa",desc:bd(x),valor:x.amount,anterior:o[i].amount!==x.amount?o[i].amount:null,anexo:(x.anexos||[]).length>(o[i].anexos||[]).length});});return;}
+    const cnt={};o.forEach(x=>{const k=JSON.stringify(x);cnt[k]=(cnt[k]||0)+1;});
+    n.forEach(x=>{const k=JSON.stringify(x);if(cnt[k])cnt[k]--;else ops.push({acao:"Inclusão",tipo:"baixa",desc:bd(x),valor:x.amount,anexo:!!x.anexos?.length});});
+    Object.entries(cnt).forEach(([k,c])=>{for(let i=0;i<c;i++){const x=JSON.parse(k);ops.push({acao:"Exclusão",tipo:"baixa",desc:bd(x),valor:x.amount});}});});
+  return ops;
+}
+// Envio para o Apps Script que dispara o e-mail ao administrador (configurado em EMAIL_HOOK)
+const EMAIL_HOOK="";const EMAIL_TOKEN="cpc-7f3a9c2e";
+function notifyEmail(ops,who){
+  if(!EMAIL_HOOK||!ops.length)return;
+  try{fetch(EMAIL_HOOK,{method:"POST",mode:"no-cors",headers:{"Content-Type":"text/plain;charset=utf-8"},body:JSON.stringify({token:EMAIL_TOKEN,ambiente:IS_HML?"homologação":"produção",usuario:who,quando:new Date().toISOString(),ops})}).catch(()=>{});}catch{}
 }
 function downloadBackup(data){
   const d=new Date();const ds=`${d.getFullYear()}-${String(d.getMonth()+1).padStart(2,"0")}-${String(d.getDate()).padStart(2,"0")}`;
@@ -431,7 +455,7 @@ function IncSheet({items,ps,baixas}){
   </ReportDoc>);
 }
 // Aba Relatórios
-function Relat({ps,baixas,mt,am,incOk}){
+function Relat({ps,baixas,mt,am,incOk,isAdmin}){
   const months=[...am].reverse();
   const[m,setM]=useState(am.includes(cmk())?cmk():months[0]);const[tipo,setTipo]=useState("ambos");const[open,setOpen]=useState(null);const[comInc,setComInc]=useState(false);
   // erros pendentes com valor (cada compra/mês uma vez)
@@ -447,10 +471,10 @@ function Relat({ps,baixas,mt,am,incOk}){
         <label style={{fontSize:11,color:Z.tx2,display:"flex",alignItems:"center",gap:6}}>Mês<select value={m} onChange={e=>setM(e.target.value)} style={sel}>{months.map(x=><option key={x} value={x}>{x}</option>)}</select></label>
         <div style={{display:"flex",gap:12,flexWrap:"wrap"}}>{tipos.map(([v,l])=>(<label key={v} style={{fontSize:12,color:Z.tx,display:"flex",alignItems:"center",gap:5,cursor:"pointer"}}><input type="radio" name="tipo" checked={tipo===v} onChange={()=>setTipo(v)} style={{accentColor:Z.ac2}}/>{l}</label>))}</div>
       </div>
-      <label style={{display:"flex",alignItems:"center",gap:8,fontSize:12,color:Z.tx,cursor:"pointer",marginBottom:14}}><input type="checkbox" checked={comInc} onChange={e=>setComInc(e.target.checked)} style={{width:16,height:16,accentColor:Z.ac2}}/>Incluir os valores das inconsistências do tipo erro</label>
+      {isAdmin&&<label style={{display:"flex",alignItems:"center",gap:8,fontSize:12,color:Z.tx,cursor:"pointer",marginBottom:14}}><input type="checkbox" checked={comInc} onChange={e=>setComInc(e.target.checked)} style={{width:16,height:16,accentColor:Z.ac2}}/>Incluir os valores das inconsistências do tipo erro</label>}
       <button onClick={()=>setOpen("mes")} style={btn}>Visualizar e imprimir</button>
     </div>
-    {open==="mes"&&<PrintShell docName={pdfName(monthTitle(tipo!=="bx",tipo!=="lanc"),m)} onClose={()=>setOpen(null)}><MonthSheet sm={m} {...{ps,baixas,mt}} showL={tipo!=="bx"} showB={tipo!=="lanc"} incErr={comInc?incErr:null}/></PrintShell>}
+    {open==="mes"&&<PrintShell docName={pdfName(monthTitle(tipo!=="bx",tipo!=="lanc"),m)} onClose={()=>setOpen(null)}><MonthSheet sm={m} {...{ps,baixas,mt}} showL={tipo!=="bx"} showB={tipo!=="lanc"} incErr={isAdmin&&comInc?incErr:null}/></PrintShell>}
   </div>);
 }
 
@@ -498,6 +522,164 @@ function Incons({ps,baixas,incOk,setIncOk,user}){
   </div>);
 }
 
+// ─── USUÁRIOS E PERFIS (cadastro em data/{amb}/usuarios/{email} e data/{amb}/perfis/{id}) ───
+// Administrador de reserva: sempre tem acesso total, mesmo se o cadastro for apagado
+const ADMIN_FIXO="kovags@gmail.com";
+const PERMS=[["editar","Incluir, alterar e excluir"],["backup","Backup"],["exportar","Exportar"],["inconsistencias","Inconsistências"],["usuarios","Gerir usuários"]];
+const allPerms=v=>Object.fromEntries(PERMS.map(([k])=>[k,v]));
+const PERFIS_PADRAO={admin:{nome:"Administrador",...allPerms(true)},editor:{nome:"Edição",...allPerms(false),editar:true},viewer:{nome:"Consulta",...allPerms(false)}};
+const NOMES_PADRAO={"kovags@gmail.com":"Diego Kovags","kelianeserra@gmail.com":"Keliane"};
+// Descobre o perfil de quem entrou; no 1º acesso do admin, cria o cadastro a partir da configuração anterior (ROLES)
+async function resolveAccess(email){
+  const fdb=initFB();const B=DOC_PATH;const now=new Date().toISOString();
+  const semeado=(await fdb.doc(`${B}/perfis/admin`).get()).exists;
+  if(email===ADMIN_FIXO){
+    if(!semeado){
+      for(const[id,p]of Object.entries(PERFIS_PADRAO))await fdb.doc(`${B}/perfis/${id}`).set(p);
+      for(const[e,r]of Object.entries(ROLES))await fdb.doc(`${B}/usuarios/${e}`).set({nome:NOMES_PADRAO[e]||e,perfil:r,ativo:true,recebeEmail:e===ADMIN_FIXO,criadoEm:now,criadoPor:email});
+    }
+    return{perfil:"admin",perfilNome:"Administrador",perms:allPerms(true)};
+  }
+  if(!semeado){const r=ROLES[email];return r?{perfil:r,perfilNome:PERFIS_PADRAO[r].nome,perms:PERFIS_PADRAO[r]}:null;}
+  const u=await fdb.doc(`${B}/usuarios/${email}`).get();if(!u.exists||!u.data().ativo)return null;
+  const p=await fdb.doc(`${B}/perfis/${u.data().perfil}`).get();if(!p.exists)return null;
+  return{perfil:u.data().perfil,perfilNome:p.data().nome,perms:p.data()};
+}
+// Registra no histórico alterações de cadastro (sem mexer nos dados financeiros)
+async function logAdmin(changes,who){
+  const fdb=initFB();if(!fdb||!changes.length)return;const ref=fdb.doc(DOC_PATH);
+  await fdb.runTransaction(async t=>{const s=await t.get(ref);const d=s.data()||{};const h=pJ(d.history)||[];h.push({ts:new Date().toISOString(),user:who,changes});while(h.length>500)h.shift();t.set(ref,{...d,history:JSON.stringify(h),rev:(d.rev||0)+1});});
+}
+function useCollection(path){
+  const[list,setList]=useState(null);
+  useEffect(()=>{const fdb=initFB();if(!fdb){setList([]);return;}return fdb.collection(path).onSnapshot(s=>setList(s.docs.map(d=>({id:d.id,...d.data()}))),()=>setList([]));},[path]);
+  return list;
+}
+function Usuarios({user}){
+  const us=useCollection(`${DOC_PATH}/usuarios`);const pf=useCollection(`${DOC_PATH}/perfis`);
+  const[edit,setEdit]=useState({});const[novo,setNovo]=useState({email:"",nome:"",perfil:"editor",ativo:true,recebeEmail:false});const[np,setNp]=useState("");const[err,setErr]=useState("");const[busy,setBusy]=useState(false);
+  const fdb=initFB();const me=user?.email;
+  const card={background:Z.cd,border:`1px solid ${Z.bd}`,borderRadius:10,padding:16,marginBottom:18};
+  const inp={background:Z.cd2,color:Z.tx,border:`1px solid ${Z.bd}`,borderRadius:6,padding:"6px 8px",fontSize:11,fontFamily:Z.ft,minWidth:0};
+  const btn={background:`linear-gradient(135deg,${Z.ac3},${Z.ac2})`,color:"#fff",border:"none",borderRadius:6,padding:"6px 12px",fontSize:11,fontWeight:600,cursor:"pointer",fontFamily:Z.ft};
+  const th={textAlign:"left",padding:"6px 6px",color:Z.tx3,fontWeight:600,fontSize:10,whiteSpace:"nowrap"};const td={padding:"6px 6px",borderTop:`1px solid ${Z.bd}`,fontSize:11,verticalAlign:"middle"};
+  if(!us||!pf)return<div style={card}><div style={{fontSize:11,color:Z.tx2}}>Carregando…</div></div>;
+  const pNome=id=>(pf.find(p=>p.id===id)||{}).nome||id;
+  const run=async(fn,changes)=>{setErr("");setBusy(true);try{await fn();await logAdmin(changes,me);}catch(e){setErr(String(e.message||e));}setBusy(false);};
+  const salvarU=u=>{const e=edit[u.id];const ch=[];if(e.nome!==u.nome)ch.push(`nome: ${u.nome} → ${e.nome}`);if(e.perfil!==u.perfil)ch.push(`perfil: ${pNome(u.perfil)} → ${pNome(e.perfil)}`);if(e.ativo!==u.ativo)ch.push(e.ativo?"reativado":"desativado");if(e.recebeEmail!==u.recebeEmail)ch.push(e.recebeEmail?"passa a receber e-mail":"deixa de receber e-mail");
+    return run(async()=>{await fdb.doc(`${DOC_PATH}/usuarios/${u.id}`).set({...u,...e,id:undefined,alteradoEm:new Date().toISOString(),alteradoPor:me},{merge:true});setEdit(x=>{const n={...x};delete n[u.id];return n;});},[`Usuário ${u.id} alterado: ${ch.join("; ")}`]);};
+  const incluir=()=>{const email=novo.email.trim().toLowerCase();if(!/^[^@\s]+@[^@\s]+\.[^@\s]+$/.test(email))return setErr("Informe um e-mail válido.");if(us.some(u=>u.id===email))return setErr("Esse e-mail já está cadastrado.");
+    return run(async()=>{await fdb.doc(`${DOC_PATH}/usuarios/${email}`).set({nome:novo.nome.trim()||email,perfil:novo.perfil,ativo:novo.ativo,recebeEmail:novo.recebeEmail,criadoEm:new Date().toISOString(),criadoPor:me});setNovo({email:"",nome:"",perfil:"editor",ativo:true,recebeEmail:false});},[`Usuário incluído: ${email} (${pNome(novo.perfil)})`]);};
+  const excluirU=u=>{if(!confirm(`Excluir o acesso de ${u.id}?`))return;run(()=>fdb.doc(`${DOC_PATH}/usuarios/${u.id}`).delete(),[`Usuário excluído: ${u.id} (${pNome(u.perfil)})`]);};
+  const togglePerm=(p,k)=>{const v=!p[k];run(()=>fdb.doc(`${DOC_PATH}/perfis/${p.id}`).set({[k]:v},{merge:true}),[`Perfil ${p.nome}: ${v?"pode":"não pode mais"} ${PERMS.find(x=>x[0]===k)[1].toLowerCase()}`]);};
+  const incluirP=()=>{const nome=np.trim();const id=nome.normalize("NFD").replace(/[̀-ͯ]/g,"").toLowerCase().replace(/[^a-z0-9]+/g,"-").replace(/^-|-$/g,"");if(!id)return setErr("Informe o nome do perfil.");if(pf.some(p=>p.id===id))return setErr("Já existe um perfil com esse nome.");
+    return run(async()=>{await fdb.doc(`${DOC_PATH}/perfis/${id}`).set({nome,...allPerms(false)});setNp("");},[`Perfil incluído: ${nome}`]);};
+  const excluirP=p=>{if(us.some(u=>u.perfil===p.id))return setErr(`O perfil ${p.nome} está em uso.`);if(!confirm(`Excluir o perfil ${p.nome}?`))return;run(()=>fdb.doc(`${DOC_PATH}/perfis/${p.id}`).delete(),[`Perfil excluído: ${p.nome}`]);};
+  const pfOrd=[...pf].sort((a,b)=>(a.id==="admin"?-1:b.id==="admin"?1:a.nome.localeCompare(b.nome)));
+  const usOrd=[...us].sort((a,b)=>(a.nome||a.id).localeCompare(b.nome||b.id));
+  return(<div>
+    {err&&<div style={{...card,borderColor:Z.rd,color:Z.rd,fontSize:11,padding:10}}>{err}</div>}
+    <div style={card}>
+      <div style={{fontSize:12,fontWeight:600,color:Z.ac,marginBottom:4}}>Usuários</div>
+      <div style={{fontSize:10,color:Z.tx3,marginBottom:10}}>O acesso é pela conta Google do e-mail cadastrado. Usuário inativo ou não cadastrado não entra. Você não pode alterar o seu próprio perfil nem se desativar.</div>
+      <div style={{overflowX:"auto"}}><table style={{width:"100%",borderCollapse:"collapse",minWidth:560}}>
+        <thead><tr><th style={th}>E-mail</th><th style={th}>Nome</th><th style={th}>Perfil</th><th style={th}>Ativo</th><th style={th}>Recebe e-mail</th><th style={th}></th></tr></thead>
+        <tbody>{usOrd.map(u=>{const e=edit[u.id]||{nome:u.nome,perfil:u.perfil,ativo:u.ativo,recebeEmail:!!u.recebeEmail};const set=k=>v=>setEdit(x=>({...x,[u.id]:{...e,[k]:v}}));const self=u.id===me||u.id===ADMIN_FIXO;const dirty=!!edit[u.id];
+          return(<tr key={u.id} style={{opacity:u.ativo?1:.55}}>
+            <td style={{...td,fontFamily:Z.mn,fontSize:10}}>{u.id}{u.id===ADMIN_FIXO&&<span title="Administrador de reserva" style={{marginLeft:4}}>🔒</span>}</td>
+            <td style={td}><input value={e.nome} onChange={x=>set("nome")(x.target.value)} style={{...inp,width:"100%"}}/></td>
+            <td style={td}><select value={e.perfil} disabled={self} onChange={x=>set("perfil")(x.target.value)} style={inp}>{pfOrd.map(p=><option key={p.id} value={p.id}>{p.nome}</option>)}</select></td>
+            <td style={{...td,textAlign:"center"}}><input type="checkbox" checked={e.ativo} disabled={self} onChange={x=>set("ativo")(x.target.checked)} style={{accentColor:Z.gn,width:15,height:15}}/></td>
+            <td style={{...td,textAlign:"center"}}><input type="checkbox" checked={e.recebeEmail} onChange={x=>set("recebeEmail")(x.target.checked)} style={{accentColor:Z.ac2,width:15,height:15}}/></td>
+            <td style={{...td,whiteSpace:"nowrap",textAlign:"right"}}>{dirty&&<><button disabled={busy} onClick={()=>salvarU(u)} style={btn}>Salvar</button> <button onClick={()=>setEdit(x=>{const n={...x};delete n[u.id];return n;})} style={{...btn,background:Z.bd,color:Z.tx2}}>✕</button></>}{!dirty&&!self&&<button disabled={busy} onClick={()=>excluirU(u)} style={{background:"none",border:"none",color:Z.rd,cursor:"pointer",fontSize:11}}>Excluir</button>}</td>
+          </tr>);})}</tbody>
+      </table></div>
+      <div style={{display:"flex",gap:6,flexWrap:"wrap",alignItems:"center",marginTop:12,paddingTop:12,borderTop:`1px solid ${Z.bd}`}}>
+        <input placeholder="e-mail (conta Google)" value={novo.email} onChange={e=>setNovo({...novo,email:e.target.value})} style={{...inp,flex:"2 1 180px"}}/>
+        <input placeholder="Nome" value={novo.nome} onChange={e=>setNovo({...novo,nome:e.target.value})} style={{...inp,flex:"1 1 110px"}}/>
+        <select value={novo.perfil} onChange={e=>setNovo({...novo,perfil:e.target.value})} style={inp}>{pfOrd.map(p=><option key={p.id} value={p.id}>{p.nome}</option>)}</select>
+        <label style={{fontSize:11,color:Z.tx2,display:"flex",gap:4,alignItems:"center"}}><input type="checkbox" checked={novo.recebeEmail} onChange={e=>setNovo({...novo,recebeEmail:e.target.checked})} style={{accentColor:Z.ac2}}/>recebe e-mail</label>
+        <button disabled={busy} onClick={incluir} style={btn}>+ Incluir usuário</button>
+      </div>
+    </div>
+    <div style={card}>
+      <div style={{fontSize:12,fontWeight:600,color:Z.ac,marginBottom:4}}>Perfis</div>
+      <div style={{fontSize:10,color:Z.tx3,marginBottom:10}}>Marque o que cada perfil pode fazer. Consultar os dados é permitido a todos os perfis. O perfil Administrador tem sempre todas as permissões.</div>
+      <div style={{overflowX:"auto"}}><table style={{width:"100%",borderCollapse:"collapse",minWidth:560}}>
+        <thead><tr><th style={th}>Perfil</th>{PERMS.map(([k,l])=><th key={k} style={{...th,textAlign:"center",whiteSpace:"normal"}}>{l}</th>)}<th style={th}>Usuários</th><th style={th}></th></tr></thead>
+        <tbody>{pfOrd.map(p=>{const n=us.filter(u=>u.perfil===p.id).length;return(<tr key={p.id}>
+          <td style={{...td,fontWeight:600}}>{p.nome}</td>
+          {PERMS.map(([k])=><td key={k} style={{...td,textAlign:"center"}}><input type="checkbox" checked={!!p[k]} disabled={busy||p.id==="admin"} onChange={()=>togglePerm(p,k)} style={{accentColor:Z.ac2,width:15,height:15}}/></td>)}
+          <td style={{...td,textAlign:"center",color:Z.tx2}}>{n}</td>
+          <td style={{...td,textAlign:"right"}}>{p.id!=="admin"&&n===0&&<button disabled={busy} onClick={()=>excluirP(p)} style={{background:"none",border:"none",color:Z.rd,cursor:"pointer",fontSize:11}}>Excluir</button>}</td>
+        </tr>);})}</tbody>
+      </table></div>
+      <div style={{display:"flex",gap:6,marginTop:12,paddingTop:12,borderTop:`1px solid ${Z.bd}`}}>
+        <input placeholder="Nome do novo perfil" value={np} onChange={e=>setNp(e.target.value)} style={{...inp,flex:1}}/>
+        <button disabled={busy} onClick={incluirP} style={btn}>+ Incluir perfil</button>
+      </div>
+    </div>
+  </div>);
+}
+
+
+// ─── CORREÇÕES PREPARADAS PELO CLAUDE: pacotes em /correcoes, aplicados pelo admin com um toque ───
+// Cada operação traz o valor esperado ("de"); se o registro mudou desde que o pacote foi preparado, ela fica em conflito.
+const sameFields=(obj,de)=>obj&&Object.keys(de||{}).every(k=>JSON.stringify(obj[k])===JSON.stringify(de[k]));
+function planCorrecao(pk,ps,baixas){
+  let P=ps.map(p=>({...p}));const B=Object.fromEntries(Object.entries(baixas).map(([m,l])=>[m,l.map(x=>({...x}))]));
+  const fmtC=c=>`${c.loja} (${fD(c.data)}) ${fB(c.total)} em ${c.parcelas}x`;const fmtB=b=>`${fB(b.amount)} em ${fD(b.date)}`;
+  const itens=(pk.ops||[]).map(o=>{
+    try{
+      if(o.op==="compra.alterar"){const i=P.findIndex(p=>p.id===o.id);if(i<0||!sameFields(P[i],o.de))return{ok:false,txt:`Compra id ${o.id}`,erro:"registro diferente do esperado"};const antes=fmtC(P[i]);P[i]={...P[i],...o.para};return{ok:true,txt:`Alterar compra id ${o.id}`,antes,depois:fmtC(P[i])+(o.para.monthly?` · meses: ${Object.keys(o.para.monthly).join(", ")}`:"")};}
+      if(o.op==="compra.incluir"){if(P.some(p=>p.id===o.compra.id))return{ok:false,txt:`Incluir compra id ${o.compra.id}`,erro:"já existe"};P.push(o.compra);return{ok:true,txt:"Incluir compra",depois:fmtC(o.compra)};}
+      if(o.op==="compra.excluir"){const i=P.findIndex(p=>p.id===o.id);if(i<0||!sameFields(P[i],o.de))return{ok:false,txt:`Excluir compra id ${o.id}`,erro:"registro diferente do esperado"};const antes=fmtC(P[i]);P.splice(i,1);return{ok:true,txt:`Excluir compra id ${o.id}`,antes};}
+      if(o.op==="loja.renomear"){const n=P.filter(p=>p.loja===o.de).length;if(!n)return{ok:false,txt:`Renomear loja ${o.de}`,erro:"nenhuma compra com esse nome"};P=P.map(p=>p.loja===o.de?{...p,loja:o.para}:p);return{ok:true,txt:`Renomear loja (${n} compra${n>1?"s":""})`,antes:o.de,depois:o.para};}
+      if(o.op==="baixa.alterar"||o.op==="baixa.excluir"){const l=B[o.mes]||[];const i=l.findIndex(x=>sameFields(x,o.de));if(i<0)return{ok:false,txt:`Baixa de ${o.mes}`,erro:"baixa não encontrada como esperado"};const antes=fmtB(l[i]);
+        if(o.op==="baixa.excluir"){l.splice(i,1);return{ok:true,txt:`Excluir baixa de ${o.mes}`,antes};}l[i]={...l[i],...o.para};return{ok:true,txt:`Alterar baixa de ${o.mes}`,antes,depois:fmtB(l[i])};}
+      if(o.op==="baixa.incluir"){(B[o.mes]=B[o.mes]||[]).push(o.baixa);return{ok:true,txt:`Incluir baixa em ${o.mes}`,depois:fmtB(o.baixa)};}
+      return{ok:false,txt:o.op,erro:"operação desconhecida"};
+    }catch(e){return{ok:false,txt:o.op,erro:String(e.message||e)};}
+  });
+  return{itens,ok:itens.length>0&&itens.every(i=>i.ok),ps:P,baixas:B};
+}
+function useCorrecoes(){
+  const[list,setList]=useState(null);
+  useEffect(()=>{const base=new URL(IS_HML?"../correcoes/":"correcoes/",location.href).href;const amb=IS_HML?"homolog":"main";
+    fetch(base+"index.json",{cache:"no-store"}).then(r=>r.ok?r.json():[]).then(async idx=>{const out=[];for(const it of idx){if(it.ambiente&&it.ambiente!=="ambos"&&it.ambiente!==amb)continue;try{const r=await fetch(base+it.arquivo,{cache:"no-store"});if(r.ok)out.push(await r.json());}catch{}}setList(out);}).catch(()=>setList([]));},[]);
+  return list;
+}
+function Correcoes({list,ps,baixas,setPs,setBaixas,corr,setCorr,user,tt}){
+  const[open,setOpen]=useState({});
+  const card={background:Z.cd,border:`1px solid ${Z.bd}`,borderRadius:10,padding:16,marginBottom:14};
+  const btn={background:`linear-gradient(135deg,${Z.ac3},${Z.ac2})`,color:"#fff",border:"none",borderRadius:6,padding:"8px 16px",fontSize:12,fontWeight:600,cursor:"pointer",fontFamily:Z.ft};
+  const btn2={background:Z.cd2,color:Z.tx2,border:`1px solid ${Z.bd}`,borderRadius:6,padding:"8px 14px",fontSize:12,cursor:"pointer",fontFamily:Z.ft};
+  const fmt=t=>new Date(t).toLocaleString("pt-BR",{day:"2-digit",month:"2-digit",year:"numeric",hour:"2-digit",minute:"2-digit"});
+  if(!list)return<div style={card}><div style={{fontSize:11,color:Z.tx2}}>Carregando…</div></div>;
+  const pend=list.filter(k=>!corr[k.id]);const feitas=list.filter(k=>corr[k.id]);
+  const decidir=(k,status,plan)=>{if(status==="aplicada"){if(!confirm(`Aplicar a correção "${k.titulo}"?`))return;setPs(plan.ps);setBaixas(plan.baixas);}
+    else if(!confirm(`Recusar a correção "${k.titulo}"? Ela não será aplicada.`))return;
+    setCorr(c=>({...c,[k.id]:{status,titulo:k.titulo,by:user?.email||"",ts:new Date().toISOString()}}));tt(status==="aplicada"?"Correção aplicada":"Correção recusada");};
+  return(<div>
+    <div style={{fontSize:11,color:Z.tx3,marginBottom:12}}>Correções de dados preparadas pelo Claude. Confira o antes e o depois; nada muda sem a sua aprovação. A correção é gravada com o seu login e registrada no Histórico.</div>
+    {!pend.length&&<div style={card}><div style={{fontSize:12,color:Z.gn}}>Nenhuma correção pendente.</div></div>}
+    {pend.map(k=>{const plan=planCorrecao(k,ps,baixas);return(<div key={k.id} style={{...card,borderColor:plan.ok?`${Z.ac3}80`:Z.rd}}>
+      <div style={{display:"flex",justifyContent:"space-between",gap:8,flexWrap:"wrap"}}><div style={{fontSize:13,fontWeight:600,color:Z.ac}}>{k.titulo}</div><div style={{fontSize:10,color:Z.tx3}}>preparada em {fmt(k.criadoEm)}</div></div>
+      {k.descricao&&<div style={{fontSize:11,color:Z.tx2,margin:"6px 0 10px",lineHeight:1.5}}>{k.descricao}</div>}
+      {plan.itens.map((i,n)=>(<div key={n} style={{padding:"7px 0",borderTop:`1px solid ${Z.bd}`,fontSize:11}}>
+        <div style={{color:i.ok?Z.tx:Z.rd,fontWeight:500}}>{i.ok?"•":"⚠"} {i.txt}{!i.ok&&` – ${i.erro}`}</div>
+        {i.antes&&<div style={{color:Z.rd,marginTop:2}}><span style={{color:Z.tx3}}>antes: </span>{i.antes}</div>}
+        {i.depois&&<div style={{color:Z.gn,marginTop:1}}><span style={{color:Z.tx3}}>depois: </span>{i.depois}</div>}
+      </div>))}
+      {!plan.ok&&<div style={{fontSize:11,color:Z.rd,margin:"8px 0"}}>Os dados mudaram desde que a correção foi preparada. Ela não pode ser aplicada; peça ao Claude para refazê-la ou recuse.</div>}
+      <div style={{display:"flex",gap:8,marginTop:12,justifyContent:"flex-end"}}><button onClick={()=>decidir(k,"recusada")} style={btn2}>Recusar</button><button disabled={!plan.ok} onClick={()=>decidir(k,"aplicada",plan)} style={{...btn,opacity:plan.ok?1:.4,cursor:plan.ok?"pointer":"not-allowed"}}>Aplicar</button></div>
+    </div>);})}
+    {feitas.length>0&&<div style={card}><div style={{fontSize:12,fontWeight:600,color:Z.ac,marginBottom:8}}>Já decididas</div>
+      {feitas.map(k=>(<div key={k.id} style={{fontSize:11,padding:"6px 0",borderTop:`1px solid ${Z.bd}`,display:"flex",justifyContent:"space-between",gap:8,flexWrap:"wrap"}}><span>{k.titulo}</span><span style={{color:corr[k.id].status==="aplicada"?Z.gn:Z.tx3}}>{corr[k.id].status==="aplicada"?"Aplicada":"Recusada"} em {fmt(corr[k.id].ts)} por {corr[k.id].by}</span></div>))}
+    </div>}
+  </div>);
+}
+
 function Hist({history}){
   const[n,setN]=useState(50);const list=[...history].reverse();
   const fmt=t=>new Date(t).toLocaleString("pt-BR",{day:"2-digit",month:"2-digit",year:"numeric",hour:"2-digit",minute:"2-digit"});
@@ -513,10 +695,12 @@ function Hist({history}){
 }
 
 function App(){
-  const[user,setUser]=useState(null);const[role,setRole]=useState(null);const[authLoading,setAuthLoading]=useState(true);const[authError,setAuthError]=useState(null);
-  const[ps,setPs]=useState([]);const[ppl,setPpl]=useState({});const[baixas,setBaixas]=useState({});const[ok,setOk]=useState(false);const[saving,setSaving]=useState(false);const[lastUpdate,setLastUpdate]=useState(null);const[loadErr,setLoadErr]=useState(null);const[history,setHistory]=useState([]);const[incOk,setIncOk]=useState({});
+  const[user,setUser]=useState(null);const[role,setRole]=useState(null);const[authLoading,setAuthLoading]=useState(true);const[authError,setAuthError]=useState(null);const[access,setAccess]=useState(null);
+  const[ps,setPs]=useState([]);const[ppl,setPpl]=useState({});const[baixas,setBaixas]=useState({});const[ok,setOk]=useState(false);const[saving,setSaving]=useState(false);const[lastUpdate,setLastUpdate]=useState(null);const[loadErr,setLoadErr]=useState(null);const[history,setHistory]=useState([]);const[incOk,setIncOk]=useState({});const[corr,setCorr]=useState({});
   const[tab,setTab]=useState("dashboard");const[sm,setSm]=useState(cmk());const[sf,setSf]=useState(false);const[ep,setEp]=useState(null);const[sr,setSr]=useState("");const[toast,setToast]=useState(null);
-  const isAdmin=role==="admin";
+  CUR_EMAIL=user?.email||"";
+  const lojasList=useMemo(()=>[...new Set(ps.map(p=>p.loja))],[ps]);
+  const P=access?.perms||{};const corrList=useCorrecoes();const corrPend=(corrList||[]).filter(k=>!corr[k.id]).length;const isAdmin=access?.perfil==="admin";const canEdit=!!P.editar;
 
   // Listen to auth state
   useEffect(()=>{
@@ -525,14 +709,14 @@ function App(){
     if(!auth){
       // Firebase indisponível (dentro do Claude) — bypass auth, modo admin
       setUser({displayName:"Local",email:"local",photoURL:null});
-      setRole("admin");setAuthLoading(false);return;
+      setAccess({perfil:"admin",perfilNome:"Administrador",perms:allPerms(true)});setRole("admin");setAuthLoading(false);return;
     }
-    const unsub=auth.onAuthStateChanged(u=>{
+    const unsub=auth.onAuthStateChanged(async u=>{
       if(u){
-        const r=getUserRole(u.email);
-        if(r){setUser(u);setRole(r);setAuthError(null);}
-        else{setAuthError("Acesso não autorizado para "+u.email);auth.signOut();setUser(null);setRole(null);}
-      }else{setUser(null);setRole(null);}
+        let a=null;try{a=await resolveAccess(u.email);}catch(e){setAuthError("Não foi possível verificar o acesso: "+(e.code||e.message||e));auth.signOut();setUser(null);setRole(null);setAuthLoading(false);return;}
+        if(a){setAccess(a);setUser(u);setRole(a.perfil);setAuthError(null);}
+        else{setAuthError("Acesso não autorizado para "+u.email);auth.signOut();setUser(null);setRole(null);setAccess(null);}
+      }else{setUser(null);setRole(null);setAccess(null);}
       setAuthLoading(false);
     });
     return()=>unsub();
@@ -542,38 +726,38 @@ function App(){
   const svRef=useRef(null);const baseRef=useRef(null);const revRef=useRef(-1);const tr=useRef(null);
   const applyRemote=(d)=>{
     if(d.rev<=revRef.current)return;
-    revRef.current=d.rev;baseRef.current={purchases:d.purchases,people:d.people,baixas:d.baixas,incOk:d.incOk};
+    revRef.current=d.rev;baseRef.current={purchases:d.purchases,people:d.people,baixas:d.baixas,incOk:d.incOk,corr:d.corr};
     svRef.current=JSON.stringify(baseRef.current);
     if(tr.current){clearTimeout(tr.current);tr.current=null;}
-    setPs(fixTrunc(d.purchases));setPpl(d.people);setBaixas(d.baixas);setIncOk(d.incOk);setHistory(d.history);setLastUpdate(d.updatedAt);setOk(true);
+    setPs(fixTrunc(d.purchases));setPpl(d.people);setBaixas(d.baixas);setIncOk(d.incOk);setCorr(d.corr);setHistory(d.history);setLastUpdate(d.updatedAt);setOk(true);
   };
   useEffect(()=>{if(!user||!role)return;
-    if(!initFB()){(async()=>{const d=await ldLocal();const x=d||{purchases:SEED_P,people:SEED_PPL,baixas:SEED_BX,updatedAt:null,rev:0,history:[],incOk:{}};revRef.current=-1;applyRemote(x);})();return;}
+    if(!initFB()){(async()=>{const d=await ldLocal();const x=d||{purchases:SEED_P,people:SEED_PPL,baixas:SEED_BX,updatedAt:null,rev:0,history:[],incOk:{},corr:{}};revRef.current=-1;applyRemote(x);})();return;}
     let unsub=null,cancel=false;
     (async()=>{try{const ref=await prepDoc();if(cancel)return;
       unsub=ref.onSnapshot(snap=>{
         if(!snap.exists){setLoadErr("Base de dados não encontrada");return;}
         const d=parseDoc(snap.data());
-        if(okRef.current&&d.rev>revRef.current&&JSON.stringify({purchases:d.purchases,people:d.people,baixas:d.baixas,incOk:d.incOk})!==JSON.stringify({purchases:ps0.current,people:ppl0.current,baixas:bx0.current,incOk:inc0.current}))tt("Dados atualizados em outro dispositivo");
+        if(okRef.current&&d.rev>revRef.current&&JSON.stringify({purchases:d.purchases,people:d.people,baixas:d.baixas,incOk:d.incOk,corr:d.corr})!==JSON.stringify({purchases:ps0.current,people:ppl0.current,baixas:bx0.current,incOk:inc0.current,corr:cor0.current}))tt("Dados atualizados em outro dispositivo");
         applyRemote(d);
       },e=>setLoadErr(String(e?.code||e?.message||e)));
     }catch(e){setLoadErr(String(e?.code||e?.message||e));}})();
     return()=>{cancel=true;if(unsub)unsub();};
   },[user,role]);
-  const okRef=useRef(false);okRef.current=ok;const ps0=useRef(ps);ps0.current=ps;const ppl0=useRef(ppl);ppl0.current=ppl;const bx0=useRef(baixas);bx0.current=baixas;const inc0=useRef(incOk);inc0.current=incOk;
+  const okRef=useRef(false);okRef.current=ok;const ps0=useRef(ps);ps0.current=ps;const ppl0=useRef(ppl);ppl0.current=ppl;const bx0=useRef(baixas);bx0.current=baixas;const inc0=useRef(incOk);inc0.current=incOk;const cor0=useRef(corr);cor0.current=corr;
 
   // Gravação automática (só admin): só quando algo mudou de fato, com histórico
-  useEffect(()=>{if(!ok||!isAdmin)return;const snap=JSON.stringify({purchases:ps,people:ppl,baixas,incOk});if(snap===svRef.current)return;if(tr.current)clearTimeout(tr.current);
-    tr.current=setTimeout(async()=>{tr.current=null;const next={purchases:ps,people:ppl,baixas,incOk};const changes=diffData(baseRef.current,next);setSaving(true);
+  useEffect(()=>{if(!ok||!canEdit)return;const snap=JSON.stringify({purchases:ps,people:ppl,baixas,incOk,corr});if(snap===svRef.current)return;if(tr.current)clearTimeout(tr.current);
+    tr.current=setTimeout(async()=>{tr.current=null;const next={purchases:ps,people:ppl,baixas,incOk,corr};const changes=diffData(baseRef.current,next);const ops=opsData(baseRef.current,next);setSaving(true);
       try{
         if(!initFB()){const now=new Date().toISOString();await svLocal({...next,updatedAt:now});svRef.current=snap;baseRef.current=next;setLastUpdate(now);setHistory(h=>changes.length?[...h,{ts:now,user:user.email,changes}]:h);tt("Salvo localmente");return;}
         const r=await saveTx(next,Math.max(revRef.current,0),changes,user.email);
-        revRef.current=r.rev;svRef.current=snap;baseRef.current=next;setLastUpdate(r.now);setHistory(r.hist);tt("Salvo no Firebase ☁");
+        revRef.current=r.rev;svRef.current=snap;baseRef.current=next;setLastUpdate(r.now);setHistory(r.hist);tt("Salvo no Firebase ☁");notifyEmail(ops,user.email);
       }catch(e){
         if(e?.code==="conflict"){tt("Os dados foram alterados em outro dispositivo. Sua última alteração não foi salva; confira e refaça.",6e3);const s2=await initFB().doc(DOC_PATH).get();revRef.current=-1;applyRemote(parseDoc(s2.data()));}
         else tt("Erro ao salvar: "+(e?.code||e?.message||e),6e3);
       }finally{setSaving(false);}
-    },.8e3);},[ps,ppl,baixas,incOk,ok]);
+    },.8e3);},[ps,ppl,baixas,incOk,corr,ok]);
   const tt=(m,ms=2e3)=>{setToast(m);setTimeout(()=>setToast(null),ms);};
   const am=useMemo(()=>{const s=new Set([cmk()]);ps.forEach(p=>Object.keys(p.monthly).forEach(m=>s.add(m)));Object.keys(baixas).forEach(m=>{if((baixas[m]||[]).length)s.add(m);});return MO.filter(m=>s.has(m));},[ps,baixas]);
   const mt=useMemo(()=>{const t={};am.forEach(m=>{t[m]=0;});ps.forEach(p=>Object.entries(p.monthly).forEach(([m,v])=>{t[m]=(t[m]||0)+v;}));return t;},[ps,am]);
@@ -649,17 +833,17 @@ function App(){
         <div style={{display:"flex",alignItems:"center",gap:5}}>
           {user.photoURL&&<img src={user.photoURL} style={{width:24,height:24,borderRadius:"50%"}} referrerPolicy="no-referrer"/>}
           <span style={{fontSize:10,color:Z.tx2}}>{user.displayName||user.email}</span>
-          <span style={{fontSize:8,padding:"2px 6px",borderRadius:4,background:isAdmin?`${Z.ac3}30`:`${Z.gn}30`,color:isAdmin?Z.ac:Z.gn,fontWeight:600}}>{isAdmin?"Admin":"Consulta"}</span>
+          <span style={{fontSize:8,padding:"2px 6px",borderRadius:4,background:isAdmin?`${Z.ac3}30`:canEdit?`${Z.yl}30`:`${Z.gn}30`,color:isAdmin?Z.ac:canEdit?Z.yl:Z.gn,fontWeight:600}}>{access?.perfilNome||"—"}</span>
         </div>
-        <button onClick={()=>downloadBackup({purchases:ps,people:ppl,baixas,updatedAt:lastUpdate,history})} title="Baixa um arquivo JSON com todos os dados" style={{background:Z.cd2,color:Z.tx2,border:`1px solid ${Z.bd}`,borderRadius:6,padding:"6px 9px",fontSize:10,cursor:"pointer"}}>Backup</button>
-        {isAdmin&&<button onClick={()=>setSf(true)} style={{background:`linear-gradient(135deg,${Z.ac3},${Z.ac2})`,color:"#fff",border:"none",borderRadius:6,padding:"6px 12px",fontSize:11,fontWeight:600,cursor:"pointer",display:"flex",alignItems:"center",gap:4}}>+ Nova Compra</button>}
-        <button onClick={()=>exportXLSX(ps,baixas,ppl,mt)} style={{background:Z.cd2,color:Z.tx2,border:`1px solid ${Z.bd}`,borderRadius:6,padding:"6px 9px",fontSize:10,cursor:"pointer"}}>Exportar</button>
+        {P.backup&&<button onClick={()=>downloadBackup({purchases:ps,people:ppl,baixas,updatedAt:lastUpdate,history})} title="Baixa um arquivo JSON com todos os dados" style={{background:Z.cd2,color:Z.tx2,border:`1px solid ${Z.bd}`,borderRadius:6,padding:"6px 9px",fontSize:10,cursor:"pointer"}}>Backup</button>}
+        {canEdit&&<button onClick={()=>setSf(true)} style={{background:`linear-gradient(135deg,${Z.ac3},${Z.ac2})`,color:"#fff",border:"none",borderRadius:6,padding:"6px 12px",fontSize:11,fontWeight:600,cursor:"pointer",display:"flex",alignItems:"center",gap:4}}>+ Nova Compra</button>}
+        {P.exportar&&<button onClick={()=>exportXLSX(ps,baixas,ppl,mt)} style={{background:Z.cd2,color:Z.tx2,border:`1px solid ${Z.bd}`,borderRadius:6,padding:"6px 9px",fontSize:10,cursor:"pointer"}}>Exportar</button>}
         <button onClick={handleLogout} style={{background:Z.cd2,color:Z.tx3,border:`1px solid ${Z.bd}`,borderRadius:6,padding:"6px 9px",fontSize:10,cursor:"pointer"}}>Sair</button>
       </div>
     </header>
 
     <nav style={{display:"flex",gap:1,padding:"0 18px",background:Z.cd,borderBottom:`1px solid ${Z.bd}`,overflowX:"auto",WebkitOverflowScrolling:"touch"}}>
-      {[["dashboard","Dashboard"],["purchases","Compras"],["baixas","Baixas"],/*["people","Terceiros"],*/["reports","Gráficos"],["relatorios","Relatórios"],...(isAdmin?[["incons","Inconsistências"]]:[]),["history","Histórico"]].map(([id,lb])=>(<button key={id} onClick={()=>setTab(id)} style={{background:tab===id?Z.cd2:"transparent",color:tab===id?Z.ac:Z.tx2,border:"none",borderBottom:tab===id?`2px solid ${Z.ac2}`:"2px solid transparent",padding:"10px 13px",fontSize:11,fontWeight:500,cursor:"pointer"}}>{lb}</button>))}
+      {[["dashboard","Dashboard"],["purchases","Compras"],["baixas","Baixas"],/*["people","Terceiros"],*/["reports","Gráficos"],["relatorios","Relatórios"],...(P.inconsistencias?[["incons","Inconsistências"]]:[]),["history","Histórico"],...(P.usuarios?[["usuarios","Usuários"]]:[]),...(isAdmin?[["correcoes",corrPend?`Correções (${corrPend})`:"Correções"]]:[])].map(([id,lb])=>(<button key={id} onClick={()=>setTab(id)} style={{background:tab===id?Z.cd2:"transparent",color:tab===id?Z.ac:Z.tx2,border:"none",borderBottom:tab===id?`2px solid ${Z.ac2}`:"2px solid transparent",padding:"10px 13px",fontSize:11,fontWeight:500,cursor:"pointer"}}>{lb}</button>))}
     </nav>
 
     <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",padding:"6px 18px",background:Z.bg,borderBottom:`1px solid ${Z.bd}`,fontSize:10,color:Z.tx3,flexWrap:"wrap",gap:4}}>
@@ -668,18 +852,20 @@ function App(){
     </div>
 
     <main style={{padding:18,maxWidth:1100,margin:"0 auto",animation:"fi .25s ease"}}>
-      {tab==="dashboard"&&<Dash {...{mt,sm,setSm,cmp,td,ap,am,ps,baixas,setBaixas,isAdmin}}/>}
-      {tab==="purchases"&&<Purch {...{ps,setPs,sr,setSr,setEp,isAdmin}}/>}
-      {tab==="baixas"&&<BaixasView {...{baixas,setBaixas,mt,am,isAdmin}}/>}
+      {tab==="dashboard"&&<Dash {...{mt,sm,setSm,cmp,td,ap,am,ps,baixas,setBaixas}} isAdmin={canEdit}/>}
+      {tab==="purchases"&&<Purch {...{ps,setPs,sr,setSr,setEp}} isAdmin={canEdit}/>}
+      {tab==="baixas"&&<BaixasView {...{baixas,setBaixas,mt,am}} isAdmin={canEdit}/>}
       {/*tab==="people"&&<Ppl ppl={ppl} setPpl={setPpl} isAdmin={isAdmin}/>*/}
       {tab==="reports"&&<Rpts {...{ps,mt,am}}/>}
-      {tab==="relatorios"&&<Relat {...{ps,baixas,mt,am,incOk}}/>}
-      {tab==="incons"&&isAdmin&&<Incons {...{ps,baixas,incOk,setIncOk,user}}/>}
+      {tab==="relatorios"&&<Relat {...{ps,baixas,mt,am,incOk}} isAdmin={!!P.inconsistencias}/>}
+      {tab==="incons"&&P.inconsistencias&&<Incons {...{ps,baixas,incOk,setIncOk,user}}/>}
       {tab==="history"&&<Hist history={history}/>}
+      {tab==="usuarios"&&P.usuarios&&<Usuarios user={user}/>}
+      {tab==="correcoes"&&isAdmin&&<Correcoes list={corrList} {...{ps,baixas,setPs,setBaixas,corr,setCorr,user,tt}}/>}
     </main>
 
-    {sf&&<Frm onClose={()=>setSf(false)} onSave={p=>{setPs(v=>[...v,{...p,id:Date.now()}]);setSf(false);tt("Compra cadastrada!");}}/>}
-    {ep&&<Frm purchase={ep} onClose={()=>setEp(null)} onSave={p=>{setPs(v=>v.map(x=>x.id===ep.id?{...x,...p}:x));setEp(null);tt("Atualizado!");}}/>}
+    {sf&&<Frm lojas={lojasList} user={user} onClose={()=>setSf(false)} onSave={p=>{setPs(v=>[...v,{...p,id:Date.now()}]);setSf(false);tt("Compra cadastrada!");}}/>}
+    {ep&&<Frm lojas={lojasList} user={user} purchase={ep} onClose={()=>setEp(null)} onSave={p=>{setPs(v=>v.map(x=>x.id===ep.id?{...x,...p}:x));setEp(null);tt("Atualizado!");}}/>}
     {toast&&<div style={{position:"fixed",bottom:20,left:"50%",transform:"translateX(-50%)",background:Z.cd2,border:`1px solid ${Z.bd2}`,borderRadius:9,padding:"8px 18px",fontSize:11,color:Z.ac,animation:"ti .25s ease",zIndex:200,boxShadow:"0 6px 24px rgba(0,0,0,.5)"}}>{toast}</div>}
   </div>);
 }
@@ -690,7 +876,7 @@ function Dash({mt,sm,setSm,cmp,td,ap,am,ps,baixas,setBaixas,isAdmin}){
   const[selLoja,setSelLoja]=useState(null);
   const[showAddBx,setShowAddBx]=useState(false);const[showPrint,setShowPrint]=useState(false);
   const[bxAmt,setBxAmt]=useState("");
-  const[bxDate,setBxDate]=useState("");
+  const[bxFile,setBxFile]=useState(null);const[bxBusy,setBxBusy]=useState(false);const[bxDate,setBxDate]=useState("");
   const[bxErr,setBxErr]=useState({});
 
   const c=mt[sm]||0;const pi=am.indexOf(sm)-1;const pv=pi>=0?(mt[am[pi]]||0):0;const df=pv>0?((c-pv)/pv*100):0;
@@ -712,16 +898,17 @@ function Dash({mt,sm,setSm,cmp,td,ap,am,ps,baixas,setBaixas,isAdmin}){
   };
   const saldoMesAcum=calcAcumDash(sm);
 
-  const addBaixa=()=>{
-    const e={};
+  const addBaixa=async()=>{
+    if(bxBusy)return;const e={};
     const amt=parseMoney(bxAmt);
     if(!bxAmt||amt<=0)e.amt="Valor inválido";
     if(!bxDate)e.date="Informe a data";
     else if(!isValidDate(bxDate))e.date="Data inválida";
     setBxErr(e);
     if(Object.keys(e).length>0)return;
-    setBaixas(prev=>{const updated={...prev};const list=[...(updated[sm]||[]),{amount:amt,date:bxDate}];updated[sm]=list;return updated;});
-    setBxAmt("");setBxDate("");setShowAddBx(false);setBxErr({});
+    let anexos=null;if(bxFile){setBxBusy(true);try{anexos=[await saveAnexo(bxFile,currentUser(),{tipo:"baixa",mes:sm,data:bxDate})];}catch(er){setBxBusy(false);alert("Não foi possível anexar o comprovante: "+(er.message||er));return;}setBxBusy(false);}
+    setBaixas(prev=>{const updated={...prev};const list=[...(updated[sm]||[]),{amount:amt,date:bxDate,...(anexos?{anexos}:{})}];updated[sm]=list;return updated;});
+    setBxAmt("");setBxDate("");setShowAddBx(false);setBxErr({});setBxFile(null);
   };
 
   const removeBaixa=(idx)=>{
@@ -757,11 +944,12 @@ function Dash({mt,sm,setSm,cmp,td,ap,am,ps,baixas,setBaixas,isAdmin}){
         <tbody>{mBaixas.map((b,i)=>(<tr key={i} style={{borderTop:`1px solid ${Z.bd}`}}>
           <td style={{padding:"4px 0",color:Z.tx3}}>{i+1}</td>
           <td style={{padding:"4px 0",textAlign:"right",fontFamily:Z.mn,color:Z.gn}}>{fB(b.amount)}</td>
-          <td style={{padding:"4px 0",textAlign:"right",color:Z.tx3}}>{fD(b.date)}</td>
+          <td style={{padding:"4px 0",textAlign:"right",color:Z.tx3}}>{b.anexos?.length>0&&<span style={{marginRight:5}}><AnexoChips ids={b.anexos} small/></span>}{fD(b.date)}</td>
           <td style={{padding:"4px 0",textAlign:"center"}}>{isAdmin&&<button onClick={()=>removeBaixa(i)} style={{background:"none",border:"none",color:Z.rd,fontSize:10,cursor:"pointer",padding:"2px 4px"}}>✕</button>}</td>
         </tr>))}</tbody>
       </table>)}
       {isAdmin&&(showAddBx?(<div style={{padding:10,background:Z.cd2,borderRadius:8,border:`1px solid ${Z.bd2}`,animation:"fi .15s ease"}}>
+        <ScanButton kind="baixa" onFile={setBxFile} onResult={r=>{if(r.valor)setBxAmt(moneyTxt(r.valor));if(r.data)setBxDate(r.data);setBxErr({});}}/>
         <div className="g3f">
           <div><label style={{fontSize:8,color:Z.tx3,display:"block",marginBottom:1}}>Valor (R$)</label>
             <div style={{position:"relative"}}><span style={{position:"absolute",left:6,top:"50%",transform:"translateY(-50%)",fontSize:9,color:Z.tx3}}>R$</span><input value={bxAmt} onChange={e=>{setBxAmt(maskMoney(e.target.value));setBxErr(p=>({...p,amt:undefined}));}} placeholder="0,00" inputMode="decimal" style={{...(bxErr.amt?bxIe:bxIs),paddingLeft:22}}/></div>
@@ -882,6 +1070,7 @@ function Purch({ps,setPs,sr,setSr,setEp,isAdmin}){
         <span style={{transform:ie?"rotate(180deg)":"rotate(0)",transition:"transform .2s",color:Z.tx3,fontSize:10}}>▼</span>
       </div>
       {ie&&(<div style={{padding:"0 12px 10px",borderTop:`1px solid ${Z.bd}`,animation:"fi .15s ease"}}>
+        {p.anexos?.length>0&&<div style={{margin:"8px 0 2px"}}><AnexoChips ids={p.anexos}/></div>}
         {isAdmin&&<div style={{display:"flex",gap:5,margin:"8px 0 5px",justifyContent:"flex-end"}}>
           <button onClick={e=>{e.stopPropagation();setEp(p);}} style={{background:Z.bd,color:Z.ac,border:"none",borderRadius:4,padding:"4px 9px",fontSize:9,cursor:"pointer"}}>Editar</button>
           <button onClick={e=>{e.stopPropagation();if(confirm("Excluir?"))setPs(v=>v.filter(x=>x.id!==p.id));}} style={{background:"#1a1015",color:Z.rd,border:"none",borderRadius:4,padding:"4px 9px",fontSize:9,cursor:"pointer"}}>Excluir</button>
@@ -907,7 +1096,143 @@ function parseMoney(v){const n=v.replace(/\./g,"").replace(",",".");const f=pars
 function maskInt(v){const d=v.replace(/\D/g,"");return d===""?"":String(Math.max(1,Math.min(48,parseInt(d)||1)));}
 function isValidDate(v){if(!v||v.length!==10)return false;const[dd,mm,yy]=v.split("/");const d=parseInt(dd),m=parseInt(mm),y=parseInt(yy);if(isNaN(d)||isNaN(m)||isNaN(y))return false;if(m<1||m>12||d<1||d>31||y<2020||y>2040)return false;const dt=new Date(y,m-1,d);return dt.getFullYear()===y&&dt.getMonth()===m-1&&dt.getDate()===d;}
 
-function Frm({purchase:pu,onClose,onSave}){
+
+// ─── LEITURA DE COMPROVANTES (OCR no próprio aparelho, com Tesseract.js hospedado em /ocr) ───
+// Interpreta o texto lido de um comprovante (compra no cartão ou pagamento/baixa)
+const nrmTxt=s=>s.normalize("NFD").replace(/[̀-ͯ]/g,"").toUpperCase();
+function parseReceipt(text,kind,lojas){
+  const lines=text.split(/\r?\n/).map(l=>l.trim()).filter(Boolean);const U=lines.map(nrmTxt);
+  const out={};
+  // valores: 1.234,56 | 1234,56 | 1234.56 (OCR às vezes troca vírgula por ponto)
+  const moneyRe=/(?:R\$|RS|R5)?\s*(\d{1,3}(?:[.\s]\d{3})*[,.]\d{2}|\d+[,.]\d{2})(?!\d)/g;
+  const toNum=s=>{s=s.replace(/\s/g,"");const m=s.match(/^(.*)[,.](\d{2})$/);return m?parseFloat(m[1].replace(/[.,]/g,"")+"."+m[2]):NaN;};
+  const vals=(i)=>[...lines[i].matchAll(moneyRe)].map(m=>toNum(m[1])).filter(v=>v>0&&v<1e7);
+  const kwTot=kind==="baixa"?/(VALOR\s*(DO\s*)?(PAGAMENTO|PAGO|TOTAL|DA TRANSFERENCIA|DO PIX)?|TOTAL\s*PAGO|VALOR)/:/(VALOR\s*TOTAL|TOTAL\s*(DA COMPRA|GERAL|A PAGAR)?|VALOR\s*(DA COMPRA|APROVADO)?|VLR)/;
+  let valor=null;
+  for(let i=0;i<U.length&&valor==null;i++){if(kwTot.test(U[i])&&!/PARCELA|TROCO|DESCONTO|TAXA|JUROS/.test(U[i])){let v=vals(i);if(!v.length&&i+1<lines.length)v=vals(i+1);if(v.length)valor=v[v.length-1];}}
+  if(valor==null){const all=lines.flatMap((_,i)=>vals(i));if(all.length)valor=Math.max(...all);}
+  if(valor!=null)out.valor=Math.round(valor*100)/100;
+  // data: dd/mm/aaaa, dd/mm/aa, dd.mm.aaaa, dd-mm-aaaa
+  const kwData=kind==="baixa"?/(PAGAMENTO|PAGO EM|REALIZAD|EFETUAD|DATA)/:/(DATA|EMISSAO|COMPRA)/;
+  const dRe=/(\d{2})\s?[\/.\-]\s?(\d{2})\s?[\/.\-]\s?(\d{4}|\d{2})(?!\d)/;
+  const okD=(d,m,y)=>{y=y.length===2?"20"+y:y;const D=+d,M=+m,Y=+y;if(M<1||M>12||D<1||D>31||Y<2015||Y>2100)return null;return`${d}/${m}/${y}`;};
+  const findDate=(pred)=>{for(let i=0;i<U.length;i++){if(!pred(i))continue;for(const j of[i,i+1]){if(j>=lines.length)continue;const m=lines[j].match(dRe);if(m){const r=okD(m[1],m[2],m[3]);if(r)return r;}}}return null;};
+  out.data=findDate(i=>kwData.test(U[i]))||findDate(()=>true)||undefined;
+  // texto por extenso: "15 de outubro de 2026"
+  if(!out.data){const mes=["JANEIRO","FEVEREIRO","MARCO","ABRIL","MAIO","JUNHO","JULHO","AGOSTO","SETEMBRO","OUTUBRO","NOVEMBRO","DEZEMBRO"];for(const u of U){const m=u.match(/(\d{1,2})\s+DE\s+([A-Z]+)\s+DE\s+(\d{4})/);if(m&&mes.includes(m[2])){out.data=`${m[1].padStart(2,"0")}/${String(mes.indexOf(m[2])+1).padStart(2,"0")}/${m[3]}`;break;}}}
+  if(!out.data)delete out.data;
+  if(kind!=="baixa"){
+    // parcelas: "3X", "EM 3 PARCELAS", "PARCELADO 3", "QTD PARCELAS: 3"
+    for(const u of U){let m=u.match(/(?:EM\s*)?(\d{1,2})\s*X\b/)||u.match(/(\d{1,2})\s*(?:PARCELAS|VEZES)/)||u.match(/PARCELAS?\s*:?\s*(\d{1,2})\b/)||u.match(/PARCELADO\D{0,12}(\d{1,2})\b/);
+      if(m){const n=+m[1];if(n>=1&&n<=48){out.parcelas=n;break;}}}
+    if(!out.parcelas&&U.some(u=>/A VISTA|AVISTA|CREDITO A VISTA/.test(u)))out.parcelas=1;
+    // loja: nome já cadastrado que aparece no texto; senão a primeira linha "de nome"
+    const full=nrmTxt(text).replace(/[^A-Z0-9 ]/g," ");
+    const known=(lojas||[]).map(l=>({l,k:nrmTxt(l).replace(/[^A-Z0-9 ]/g," ").replace(/\s+/g," ").trim()})).filter(x=>x.k.length>=3).sort((a,b)=>b.k.length-a.k.length);
+    const hit=known.find(x=>full.replace(/\s+/g," ").includes(x.k));
+    if(hit)out.loja=hit.l;
+    else{const bad=/(CNPJ|CPF|COMPROVANTE|VIA|CLIENTE|ESTABELECIMENTO|CARTAO|CREDITO|DEBITO|VISA|MASTER|ELO|DATA|HORA|VALOR|TOTAL|AUTORIZ|TERMINAL|NSU|DOC|CUPOM|FISCAL|NOTA|ENDERECO|RUA|AV\b|TEL|R\$|\d{4})/;
+      for(let i=0;i<Math.min(U.length,8);i++){const u=U[i];if(bad.test(u))continue;const letters=(u.match(/[A-Z]/g)||[]).length;if(letters>=3&&letters/u.length>.5){out.loja=lines[i].replace(/\s+/g," ").toLowerCase().replace(/(^|\s)\S/g,c=>c.toUpperCase()).trim();break;}}}
+  }
+  return out;
+}
+let ocrWorker=null;
+function ocrBase(){return new URL(IS_HML?"../ocr/":"ocr/",location.href).href;}
+function loadScript(src){return new Promise((ok,err)=>{const s=document.createElement("script");s.src=src;s.onload=ok;s.onerror=()=>err(new Error("Falha ao carregar o leitor"));document.head.appendChild(s);});}
+async function getOcr(onProg){
+  if(ocrWorker)return ocrWorker;
+  const b=ocrBase();if(typeof Tesseract==="undefined")await loadScript(b+"tesseract.min.js");
+  ocrWorker=await Tesseract.createWorker("por",1,{workerPath:b+"worker.min.js",corePath:b+"core",langPath:b+"lang",gzip:true,logger:m=>{if(m.status==="recognizing text"&&onProg)onProg(m.progress);}});
+  return ocrWorker;
+}
+// reduz fotos grandes (câmera do celular) para acelerar a leitura
+function prepImage(file){return new Promise((ok,err)=>{const img=new Image();img.onload=()=>{const k=Math.min(1,2000/Math.max(img.width,img.height));const c=document.createElement("canvas");c.width=Math.round(img.width*k);c.height=Math.round(img.height*k);const x=c.getContext("2d");x.filter="grayscale(1) contrast(1.3)";x.drawImage(img,0,0,c.width,c.height);URL.revokeObjectURL(img.src);ok(c);};img.onerror=()=>err(new Error("Imagem inválida"));img.src=URL.createObjectURL(file);});}
+
+// ─── ANEXOS (comprovantes): guardados no Firestore em partes, em data/{amb}/anexos/{id}/partes/{n} ───
+const ANX_CHUNK=700000;const ANX_MAX=8*1024*1024;const anxLocal={};
+const newAid=()=>"a"+Date.now().toString(36)+Math.random().toString(36).slice(2,7);
+function blobToB64(b){return new Promise((ok,err)=>{const r=new FileReader();r.onload=()=>ok(String(r.result).split(",")[1]);r.onerror=()=>err(new Error("Falha ao ler o arquivo"));r.readAsDataURL(b);});}
+function b64ToBlob(b64,tipo){const bin=atob(b64);const u=new Uint8Array(bin.length);for(let i=0;i<bin.length;i++)u[i]=bin.charCodeAt(i);return new Blob([u],{type:tipo});}
+// fotos são reduzidas (lado maior 1600 px, JPEG) para caber bem na base
+function compressImage(file){return new Promise((ok,err)=>{const img=new Image();img.onload=()=>{const k=Math.min(1,1600/Math.max(img.width,img.height));const c=document.createElement("canvas");c.width=Math.round(img.width*k);c.height=Math.round(img.height*k);c.getContext("2d").drawImage(img,0,0,c.width,c.height);URL.revokeObjectURL(img.src);c.toBlob(b=>b?ok(b):err(new Error("Falha ao comprimir")),"image/jpeg",.78);};img.onerror=()=>err(new Error("Imagem inválida"));img.src=URL.createObjectURL(file);});}
+async function saveAnexo(file,who,ref){
+  const isImg=(file.type||"").startsWith("image/");const blob=isImg?await compressImage(file):file;const tipo=isImg?"image/jpeg":(file.type||"application/pdf");
+  if(blob.size>ANX_MAX)throw new Error("arquivo maior que 8 MB");
+  const b64=await blobToB64(blob);const parts=[];for(let i=0;i<b64.length;i+=ANX_CHUNK)parts.push(b64.slice(i,i+ANX_CHUNK));
+  const aid=newAid();const meta={nome:file.name||"comprovante",tipo,tamanho:blob.size,partes:parts.length,criadoEm:new Date().toISOString(),criadoPor:who||"",ref:ref||null};
+  const fdb=initFB();if(!fdb){anxLocal[aid]={meta,b64};return aid;}
+  for(let i=0;i<parts.length;i++)await fdb.doc(`${DOC_PATH}/anexos/${aid}/partes/${i}`).set({d:parts[i]});
+  await fdb.doc(`${DOC_PATH}/anexos/${aid}`).set(meta);
+  return aid;
+}
+async function loadAnexo(aid){
+  const fdb=initFB();if(!fdb){const x=anxLocal[aid];if(!x)throw new Error("anexo não encontrado");return{meta:x.meta,blob:b64ToBlob(x.b64,x.meta.tipo)};}
+  const m=await fdb.doc(`${DOC_PATH}/anexos/${aid}`).get();if(!m.exists)throw new Error("anexo não encontrado");const meta=m.data();
+  let b64="";for(let i=0;i<meta.partes;i++){const p=await fdb.doc(`${DOC_PATH}/anexos/${aid}/partes/${i}`).get();b64+=p.data().d;}
+  return{meta,blob:b64ToBlob(b64,meta.tipo)};
+}
+function AnexoViewer({aid,onClose}){
+  const[st,setSt]=useState({load:true});
+  useEffect(()=>{let url=null;loadAnexo(aid).then(r=>{url=URL.createObjectURL(r.blob);setSt({meta:r.meta,url});}).catch(e=>setSt({err:String(e.message||e)}));return()=>{if(url)URL.revokeObjectURL(url);};},[aid]);
+  const btn={background:Z.cd2,color:Z.tx,border:`1px solid ${Z.bd}`,borderRadius:6,padding:"7px 12px",fontSize:11,cursor:"pointer",fontFamily:Z.ft,textDecoration:"none"};
+  return ReactDOM.createPortal(<div onClick={onClose} style={{position:"fixed",inset:0,background:"rgba(0,0,0,.85)",zIndex:400,display:"flex",flexDirection:"column",alignItems:"center",justifyContent:"center",padding:14,fontFamily:Z.ft}}>
+    <div onClick={e=>e.stopPropagation()} style={{background:Z.cd,border:`1px solid ${Z.bd2}`,borderRadius:10,padding:12,maxWidth:"min(760px,100%)",width:"100%",maxHeight:"92vh",display:"flex",flexDirection:"column",gap:8}}>
+      <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",gap:8,flexWrap:"wrap"}}>
+        <div style={{fontSize:11,color:Z.tx2,minWidth:0,overflow:"hidden",textOverflow:"ellipsis"}}>{st.meta?<><b style={{color:Z.tx}}>{st.meta.nome}</b> · {(st.meta.tamanho/1024).toFixed(0)} KB · enviado em {new Date(st.meta.criadoEm).toLocaleString("pt-BR",{day:"2-digit",month:"2-digit",year:"numeric",hour:"2-digit",minute:"2-digit"})}{st.meta.criadoPor?` por ${st.meta.criadoPor}`:""}</>:"Comprovante"}</div>
+        <div style={{display:"flex",gap:6}}>{st.url&&<a href={st.url} download={st.meta.nome} style={btn}>Baixar</a>}{st.url&&<a href={st.url} target="_blank" rel="noopener" style={btn}>Abrir</a>}<button onClick={onClose} style={btn}>Fechar</button></div>
+      </div>
+      <div style={{flex:1,overflow:"auto",display:"flex",justifyContent:"center",background:Z.bg,borderRadius:6,minHeight:200}}>
+        {st.load&&<div style={{color:Z.tx2,fontSize:12,alignSelf:"center"}}>Carregando…</div>}
+        {st.err&&<div style={{color:Z.rd,fontSize:12,alignSelf:"center"}}>Não foi possível abrir: {st.err}</div>}
+        {st.url&&(st.meta.tipo.startsWith("image/")?<img src={st.url} style={{maxWidth:"100%",objectFit:"contain"}}/>:<object data={st.url} type={st.meta.tipo} style={{width:"100%",height:"70vh"}}><div style={{color:Z.tx2,fontSize:12,padding:20}}>Use "Abrir" ou "Baixar" para ver o PDF.</div></object>)}
+      </div>
+    </div>
+  </div>,document.body);
+}
+function AnexoChips({ids,small}){
+  const[v,setV]=useState(null);if(!ids||!ids.length)return null;
+  return(<><span style={{display:"inline-flex",gap:4,flexWrap:"wrap",verticalAlign:"middle"}}>{ids.map((a,i)=>(<button key={a} title="Ver comprovante" onClick={e=>{e.stopPropagation();setV(a);}} style={{background:`${Z.ac3}25`,color:Z.ac,border:`1px solid ${Z.ac3}50`,borderRadius:4,padding:small?"0 4px":"2px 7px",fontSize:small?9:10,cursor:"pointer",fontFamily:Z.ft}}>📎{small?"":` Comprovante${ids.length>1?" "+(i+1):""}`}</button>))}</span>{v&&<AnexoViewer aid={v} onClose={()=>setV(null)}/>}</>);
+}
+// PDF: usa o texto embutido (exato); se for digitalizado, renderiza a 1ª página e lê por OCR
+async function getPdfJs(){const b=ocrBase()+"pdf/";if(typeof pdfjsLib==="undefined")await loadScript(b+"pdf.min.js");pdfjsLib.GlobalWorkerOptions.workerSrc=b+"pdf.worker.min.js";return pdfjsLib;}
+async function pdfToTextOrCanvas(file){
+  const lib=await getPdfJs();const doc=await lib.getDocument({data:new Uint8Array(await file.arrayBuffer())}).promise;
+  let text="";for(let i=1;i<=Math.min(doc.numPages,2);i++){const pg=await doc.getPage(i);const tc=await pg.getTextContent();let lastY=null;for(const it of tc.items){const y=Math.round(it.transform[5]);text+=(lastY!==null&&Math.abs(y-lastY)>2?"\n":(text&&!text.endsWith("\n")?" ":""))+it.str;lastY=y;}text+="\n";}
+  if(text.replace(/\s/g,"").length>=30)return{text};
+  const pg=await doc.getPage(1);const vp=pg.getViewport({scale:2});const c=document.createElement("canvas");c.width=vp.width;c.height=vp.height;await pg.render({canvasContext:c.getContext("2d"),viewport:vp}).promise;return{canvas:c};
+}
+const SCAN_LABELS={valor:"valor",data:"data",parcelas:"parcelas",loja:"loja"};
+function ScanButton({kind,lojas,onResult,onFile}){
+  const[st,setSt]=useState(null);const[prog,setProg]=useState(0);const[res,setRes]=useState(null);const[txt,setTxt]=useState("");const[show,setShow]=useState(false);const[thumb,setThumb]=useState(null);const[fname,setFname]=useState("");
+  const ref=useRef(null);
+  const want=kind==="baixa"?["valor","data"]:["loja","valor","parcelas","data"];
+  const go=async f=>{if(!f)return;const isPdf=f.type==="application/pdf"||/\.pdf$/i.test(f.name);setSt("lendo");setProg(0);setRes(null);setThumb(isPdf?null:URL.createObjectURL(f));setFname(f.name);if(onFile)onFile(f);
+    try{let text;if(isPdf){const r=await pdfToTextOrCanvas(f);if(r.text)text=r.text;else{const w=await getOcr(setProg);text=(await w.recognize(r.canvas)).data.text;}}else{const c=await prepImage(f);const w=await getOcr(setProg);text=(await w.recognize(c)).data.text;}
+      const r=parseReceipt(text,kind,lojas);setTxt(text);setRes(r);setSt("ok");onResult(r);}
+    catch(e){setSt("erro");setTxt(String(e?.message||e));}};
+  const lidos=res?want.filter(k=>res[k]!=null):[];const faltam=res?want.filter(k=>res[k]==null):[];
+  return(<div style={{marginBottom:10}}>
+    <input ref={ref} type="file" accept="image/*,application/pdf" style={{display:"none"}} onChange={e=>{go(e.target.files[0]);e.target.value="";}}/>
+    <button type="button" onClick={()=>ref.current.click()} disabled={st==="lendo"} style={{width:"100%",background:`${Z.ac3}20`,color:Z.ac,border:`1px dashed ${Z.ac3}80`,borderRadius:6,padding:"8px 10px",fontSize:11,fontWeight:600,cursor:st==="lendo"?"wait":"pointer",fontFamily:Z.ft}}>{st==="lendo"?`Lendo a imagem… ${Math.round(prog*100)}%`:"📷 Anexar comprovante (foto ou PDF) e preencher"}</button>
+    {st&&st!=="lendo"&&(<div style={{display:"flex",gap:8,marginTop:6,alignItems:"flex-start"}}>
+      {thumb?<img src={thumb} style={{width:44,height:44,objectFit:"cover",borderRadius:4,border:`1px solid ${Z.bd2}`,flexShrink:0}}/>:<div style={{width:44,height:44,borderRadius:4,border:`1px solid ${Z.bd2}`,display:"flex",alignItems:"center",justifyContent:"center",fontSize:10,color:Z.tx2,flexShrink:0}}>PDF</div>}
+      <div style={{fontSize:10,lineHeight:1.5,flex:1}}>
+        {onFile&&<div style={{color:Z.tx2}}>📎 {fname} será anexado ao salvar.</div>}
+        {st==="erro"&&<div style={{color:Z.rd}}>Não foi possível ler o arquivo ({txt}). Preencha manualmente; o arquivo será anexado mesmo assim.</div>}
+        {st==="ok"&&<>
+          {lidos.length>0&&<div style={{color:Z.gn}}>Preenchido pela imagem: {lidos.map(k=>SCAN_LABELS[k]).join(", ")}. <b>Confira antes de salvar.</b></div>}
+          {faltam.length>0&&<div style={{color:Z.yl}}>Não identificado: {faltam.map(k=>SCAN_LABELS[k]).join(", ")}. Preencha manualmente.</div>}
+          <button type="button" onClick={()=>setShow(!show)} style={{background:"none",border:"none",color:Z.tx3,fontSize:9,padding:0,cursor:"pointer",fontFamily:Z.ft}}>{show?"▾ ocultar texto lido":"▸ ver texto lido"}</button>
+          {show&&<pre style={{whiteSpace:"pre-wrap",fontSize:9,color:Z.tx2,background:Z.bg,padding:6,borderRadius:4,maxHeight:120,overflowY:"auto",margin:"4px 0 0"}}>{txt}</pre>}
+        </>}
+      </div>
+    </div>)}
+  </div>);
+}
+const moneyTxt=v=>maskMoney(v.toFixed(2).replace(".",","));
+
+function Frm({purchase:pu,onClose,onSave,lojas,user}){
+  const[file,setFile]=useState(null);const[busy,setBusy]=useState(false);
   const initTotal=pu?.total?maskMoney(pu.total.toFixed(2).replace(".",",")):"";
   const[lj,setLj]=useState(pu?.loja||"");
   const[tt,setTt]=useState(initTotal);
@@ -926,11 +1251,13 @@ function Frm({purchase:pu,onClose,onSave}){
     setErrors(e);return Object.keys(e).length===0;
   };
 
-  const go=()=>{
-    if(!validate())return;
+  const go=async()=>{
+    if(!validate()||busy)return;
     const tv=parseMoney(tt);const pv=parseInt(pc)||1;const vp=Math.round((tv/pv)*100)/100;
     const si=MO.indexOf(startM);const m={};for(let i=0;i<pv&&si+i<MO.length;i++)m[MO[si+i]]=vp;
-    onSave({loja:lj.trim(),total:tv,parcelas:pv,data:dt||null,monthly:m});
+    let anexos=pu?.anexos||[];
+    if(file){setBusy(true);try{anexos=[...anexos,await saveAnexo(file,user?.email,{tipo:"compra",loja:lj.trim(),data:dt})];}catch(e){setBusy(false);alert("Não foi possível anexar o comprovante: "+(e.message||e));return;}}
+    onSave({loja:lj.trim(),total:tv,parcelas:pv,data:dt||null,monthly:m,...(anexos.length?{anexos}:{})});
   };
 
   const is={width:"100%",background:Z.cd2,border:`1px solid ${Z.bd}`,borderRadius:6,padding:"8px 10px",color:Z.tx,fontSize:12,boxSizing:"border-box",fontFamily:Z.ft};
@@ -941,6 +1268,8 @@ function Frm({purchase:pu,onClose,onSave}){
   return(<div onClick={onClose} style={{position:"fixed",inset:0,background:"rgba(0,0,0,.75)",display:"flex",alignItems:"center",justifyContent:"center",zIndex:100,backdropFilter:"blur(5px)"}}>
     <div onClick={e=>e.stopPropagation()} className="modal-inner" style={{background:Z.cd,border:`1px solid ${Z.bd2}`,borderRadius:13,padding:22,width:"90%",maxWidth:400,animation:"fi .2s ease"}}>
       <h2 style={{margin:"0 0 16px",fontSize:15,fontWeight:600}}>{pu?"Editar Compra":"Nova Compra"}</h2>
+      {pu?.anexos?.length>0&&<div style={{fontSize:10,color:Z.tx2,marginBottom:8}}>Comprovantes desta compra: <AnexoChips ids={pu.anexos}/></div>}
+      <ScanButton kind="compra" lojas={lojas} onFile={setFile} onResult={r=>{if(r.loja)setLj(r.loja);if(r.valor)setTt(moneyTxt(r.valor));if(r.parcelas)setPc(String(r.parcelas));if(r.data)setDt(r.data);setErrors({});}}/>
       <div style={{display:"flex",flexDirection:"column",gap:10}}>
         <div><label style={{fontSize:10,color:Z.tx3,display:"block",marginBottom:2}}>Loja</label><input value={lj} onChange={e=>{setLj(e.target.value);setErrors(p=>({...p,lj:undefined}));}} placeholder="Nome da loja" style={errors.lj?ie:is}/>{errors.lj&&<div style={eStyle}>{errors.lj}</div>}</div>
         <div className="g2f">
@@ -967,7 +1296,7 @@ function Frm({purchase:pu,onClose,onSave}){
       </div>
       <div style={{display:"flex",gap:7,marginTop:16,justifyContent:"flex-end"}}>
         <button onClick={onClose} style={{background:Z.bd,color:Z.tx,border:"none",borderRadius:6,padding:"8px 16px",fontSize:11,cursor:"pointer"}}>Cancelar</button>
-        <button onClick={go} style={{background:`linear-gradient(135deg,${Z.ac3},${Z.ac2})`,color:"#fff",border:"none",borderRadius:6,padding:"8px 16px",fontSize:11,fontWeight:600,cursor:"pointer"}}>Salvar</button>
+        <button onClick={go} disabled={busy} style={{background:`linear-gradient(135deg,${Z.ac3},${Z.ac2})`,color:"#fff",border:"none",borderRadius:6,padding:"8px 16px",fontSize:11,fontWeight:600,cursor:busy?"wait":"pointer",opacity:busy?.7:1}}>{busy?"Enviando comprovante…":"Salvar"}</button>
       </div>
     </div>
   </div>);
@@ -1060,7 +1389,7 @@ function BaixasView({baixas,setBaixas,mt,am,isAdmin}){
   const[selM,setSelM]=useState(cmk());
   const[showAdd,setShowAdd]=useState(false);
   const[bAmt,setBAmt]=useState("");
-  const[bDate,setBDate]=useState("");
+  const[bFile,setBFile]=useState(null);const[bBusy,setBBusy]=useState(false);const[bDate,setBDate]=useState("");
   const[bErr,setBErr]=useState({});
   const[editIdx,setEditIdx]=useState(null);
   const[editAmt,setEditAmt]=useState("");
@@ -1091,22 +1420,23 @@ function BaixasView({baixas,setBaixas,mt,am,isAdmin}){
   };
   const saldoAcum=calcAcum(selM);
 
-  const addBx=()=>{
-    const e={};
+  const addBx=async()=>{
+    if(bBusy)return;const e={};
     const amt=parseMoney(bAmt);
     if(!bAmt||amt<=0)e.amt="Valor inválido";
     if(!bDate)e.date="Informe a data";
     else if(!isValidDate(bDate))e.date="Data inválida";
     setBErr(e);
     if(Object.keys(e).length>0)return;
-    setBaixas(prev=>{const u={...prev};u[selM]=[...(u[selM]||[]),{amount:amt,date:bDate}];return u;});
-    setBAmt("");setBDate("");setShowAdd(false);setBErr({});
+    let anexos=null;if(bFile){setBBusy(true);try{anexos=[await saveAnexo(bFile,currentUser(),{tipo:"baixa",mes:selM,data:bDate})];}catch(er){setBBusy(false);alert("Não foi possível anexar o comprovante: "+(er.message||er));return;}setBBusy(false);}
+    setBaixas(prev=>{const u={...prev};u[selM]=[...(u[selM]||[]),{amount:amt,date:bDate,...(anexos?{anexos}:{})}];return u;});
+    setBAmt("");setBDate("");setShowAdd(false);setBErr({});setBFile(null);
   };
 
   const remBx=(idx)=>{setBaixas(prev=>{const u={...prev};const l=[...(u[selM]||[])];l.splice(idx,1);u[selM]=l;return u;});};
   const startEdit=(idx)=>{const b=mBx[idx];setEditIdx(idx);setEditAmt(maskMoney(b.amount.toFixed(2).replace(".",",")));setEditDate(b.date?fD(b.date):"");};
   const cancelEdit=()=>{setEditIdx(null);setEditAmt("");setEditDate("");};
-  const saveEdit=()=>{const amt=parseMoney(editAmt);if(amt<=0)return;const dt=editDate&&editDate.length===10&&isValidDate(editDate)?editDate:null;setBaixas(prev=>{const u={...prev};const l=[...(u[selM]||[])];l[editIdx]={amount:amt,date:dt||l[editIdx].date};u[selM]=l;return u;});cancelEdit();};
+  const saveEdit=()=>{const amt=parseMoney(editAmt);if(amt<=0)return;const dt=editDate&&editDate.length===10&&isValidDate(editDate)?editDate:null;setBaixas(prev=>{const u={...prev};const l=[...(u[selM]||[])];l[editIdx]={...l[editIdx],amount:amt,date:dt||l[editIdx].date};u[selM]=l;return u;});cancelEdit();};
 
   // Histórico: ignorar os 4 primeiros meses (sem dados), ordenar desc
   const skipMonths=new Set(["Abril/2023","Maio/2023","Junho/2023","Julho/2023"]);
@@ -1136,6 +1466,7 @@ function BaixasView({baixas,setBaixas,mt,am,isAdmin}){
 
       {isAdmin&&showAdd&&(<div style={{padding:12,background:Z.cd2,borderRadius:8,border:`1px solid ${Z.bd2}`,marginBottom:12,animation:"fi .15s ease"}}>
         <div style={{fontSize:10,fontWeight:600,color:Z.ac,marginBottom:8}}>Registrar Baixa — {selM}</div>
+        <ScanButton kind="baixa" onFile={setBFile} onResult={r=>{if(r.valor)setBAmt(moneyTxt(r.valor));if(r.data)setBDate(r.data);setBErr({});}}/>
         <div className="g3f">
           <div><label style={{fontSize:9,color:Z.tx3,display:"block",marginBottom:2}}>Valor (R$)</label>
             <div style={{position:"relative"}}><span style={{position:"absolute",left:7,top:"50%",transform:"translateY(-50%)",fontSize:10,color:Z.tx3}}>R$</span><input value={bAmt} onChange={e=>{setBAmt(maskMoney(e.target.value));setBErr(p=>({...p,amt:undefined}));}} placeholder="0,00" inputMode="decimal" style={{...(bErr.amt?ie:is),paddingLeft:24}}/></div>
@@ -1163,7 +1494,7 @@ function BaixasView({baixas,setBaixas,mt,am,isAdmin}){
         </tr>):(<tr key={i} style={{borderTop:`1px solid ${Z.bd}`,cursor:isAdmin?"pointer":"default"}} onDoubleClick={()=>isAdmin&&startEdit(i)}>
           <td style={{padding:"6px 0",color:Z.tx3}}>{i+1}</td>
           <td style={{padding:"6px 0",textAlign:"right",fontFamily:Z.mn,color:Z.gn,fontWeight:600}}>{fB(b.amount)}</td>
-          <td style={{padding:"6px 0",textAlign:"right",color:Z.tx3}}>{b.date?fD(b.date):"—"}</td>
+          <td style={{padding:"6px 0",textAlign:"right",color:Z.tx3}}>{b.anexos?.length>0&&<span style={{marginRight:5}}><AnexoChips ids={b.anexos} small/></span>}{b.date?fD(b.date):"—"}</td>
           <td style={{padding:"6px 0",textAlign:"center"}}>{isAdmin&&<button onClick={()=>remBx(i)} style={{background:"none",border:"none",color:Z.rd,fontSize:11,cursor:"pointer",padding:"2px 4px"}}>✕</button>}</td>
         </tr>))}</tbody>
         <tfoot><tr style={{borderTop:`2px solid ${Z.bd2}`}}>

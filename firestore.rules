@@ -2,17 +2,48 @@ rules_version = '2';
 service cloud.firestore {
   match /databases/{database}/documents {
 
+    // ── Quem é o usuário e o que o perfil dele permite (cadastro do menu Usuários) ──
     function email() {
       return request.auth != null && request.auth.token.email_verified == true
-        ? request.auth.token.email : '';
+        ? request.auth.token.email.lower() : '';
     }
-    function isAdmin()  { return email() == 'kovags@gmail.com'; }
-    function isViewer() { return email() == 'kelianeserra@gmail.com'; }
+    // Administrador de reserva: acesso total mesmo que o cadastro seja apagado
+    function adminFixo() { return email() == 'kovags@gmail.com'; }
+    function ficha(amb)  { return /databases/$(database)/documents/data/$(amb)/usuarios/$(email()); }
+    function ativo(amb)  { return exists(ficha(amb)) && get(ficha(amb)).data.ativo == true; }
+    function pode(amb, p) {
+      return adminFixo() || (ativo(amb) &&
+        get(/databases/$(database)/documents/data/$(amb)/perfis/$(get(ficha(amb)).data.perfil)).data[p] == true);
+    }
+    function leitor(amb) { return adminFixo() || ativo(amb); }
 
     // data/main = produção, data/homolog = homologação
-    match /data/{docId} {
-      allow read:  if docId in ['main', 'homolog'] && (isAdmin() || isViewer());
-      allow write: if docId in ['main', 'homolog'] && isAdmin();
+    match /data/{amb} {
+      allow read:  if amb in ['main', 'homolog'] && leitor(amb);
+      allow write: if amb in ['main', 'homolog'] && pode(amb, 'editar');
+
+      // Comprovantes anexados (metadados) e suas partes (conteúdo em base64)
+      match /anexos/{aid} {
+        allow read:   if leitor(amb);
+        allow create: if pode(amb, 'editar');
+        allow delete: if pode(amb, 'usuarios');
+        match /partes/{n} {
+          allow read:   if leitor(amb);
+          allow create: if pode(amb, 'editar');
+          allow delete: if pode(amb, 'usuarios');
+        }
+      }
+
+      // Cadastro de usuários e perfis: todos leem (o app precisa saber o próprio perfil);
+      // só quem tem a permissão "Gerir usuários" altera
+      match /usuarios/{u} {
+        allow read:  if leitor(amb) || email() == u;
+        allow write: if pode(amb, 'usuarios');
+      }
+      match /perfis/{p} {
+        allow read:  if request.auth != null;
+        allow write: if pode(amb, 'usuarios') && p != 'admin' || adminFixo();
+      }
     }
 
     // Qualquer outro caminho: bloqueado
