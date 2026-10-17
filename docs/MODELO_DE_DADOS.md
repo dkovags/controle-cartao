@@ -32,6 +32,7 @@ erDiagram
         string people "JSON: { nome: Terceiro[] }"
         string history "JSON: Alteracao[] (últimas 500)"
         string incOk "JSON: { chave: Tratamento }"
+        string corr "JSON: { idPacote: Decisao } (menu Correções)"
         string updatedAt "ISO 8601, última alteração real"
         int rev "versão, sobe 1 a cada gravação"
     }
@@ -189,6 +190,23 @@ Perfis iniciais:
   (perfis acima e os usuários de `ROLES` em `src/index.html`). Até isso acontecer, vale `ROLES`.
 - As regras do Firestore (`firestore.rules`) consultam essas mesmas fichas para liberar leitura e gravação.
 - Alterações de cadastro entram no histórico do ambiente.
+
+## Correções preparadas pelo Claude (pasta `correcoes/` + campo `corr`)
+
+Correções de dados são preparadas como arquivos JSON na pasta `correcoes/` do repositório
+(publicada com o site) e listadas em `correcoes/index.json`, cada uma com o ambiente a que se
+destina (`main`, `homolog` ou `ambos`). No menu **Correções** (só administrador), cada pacote
+mostra o antes e o depois; ao **Aplicar** ou **Recusar**, a decisão fica em `corr`:
+
+```json
+{ "2026-10-17-teste-na": { "status": "aplicada", "titulo": "Teste: loja \"N/A\" passa a \"Não informada\"",
+  "by": "kovags@gmail.com", "ts": "2026-10-17T16:29:12Z" } }
+```
+
+Cada operação do pacote confere o valor esperado (`de`) antes de alterar; se o registro mudou,
+o pacote fica bloqueado. Operações: `compra.alterar`, `compra.incluir`, `compra.excluir`,
+`loja.renomear`, `baixa.alterar`, `baixa.incluir`, `baixa.excluir` (detalhes em `correcoes/LEIA-ME.md`).
+A alteração é gravada com o login de quem aplicou e registrada no histórico.
 
 ## Notificação por e-mail
 
