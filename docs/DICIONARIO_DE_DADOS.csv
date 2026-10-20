@@ -5,6 +5,7 @@ AMBIENTE;baixas;Baixas;texto (JSON de objeto);"{ ""Mês/AAAA"": [BAIXA] }";sim;�
 AMBIENTE;people;Terceiros;texto (JSON de objeto);{ nome: [TERCEIRO] };sim;—;{};"{""Kelly"":[…]}";Aba oculta no app.
 AMBIENTE;history;Histórico;texto (JSON de lista);lista de ALTERACAO;sim;—;[];[{…}];"Guarda as 500 últimas; as mais antigas são descartadas."
 AMBIENTE;incOk;Inconsistências tratadas;texto (JSON de objeto);{ chave: TRATAMENTO };não;—;{};"{""…|p51"":{…}}";Só o admin altera pelo app.
+AMBIENTE;ajustes;Ajustes de inconsistência;texto (JSON de objeto);"{ ""Mês/AAAA"": [AJUSTE] }";não;—;{};"{""Outubro/2026"":[…]}";Somados à fatura do mês.
 AMBIENTE;corr;Correções decididas;texto (JSON de objeto);{ pacote: DECISAO_CORRECAO };não;—;{};"{""2026-10-17-teste-na"":{…}}";Só o admin decide pelo app.
 AMBIENTE;updatedAt;Última alteração;texto;ISO 8601 UTC;sim;—;—;2026-10-17T16:29:13.118Z;Atualizado só quando os dados mudam de fato.
 AMBIENTE;rev;Versão do documento;inteiro;≥ 0;sim;—;0;42;"Incrementado a cada gravação; gravação recusada se outro aparelho gravou antes (conflito)."
@@ -42,6 +43,13 @@ DECISAO_CORRECAO;status;Decisão;texto;aplicada | recusada;sim;—;—;aplicada;
 DECISAO_CORRECAO;titulo;Título;texto;livre;sim;—;título do pacote;"Teste: loja ""N/A""…";—
 DECISAO_CORRECAO;by;Quem decidiu;texto;e-mail;sim;FK → USUARIO;usuário logado;kovags@gmail.com;Só o administrador.
 DECISAO_CORRECAO;ts;Quando;texto;ISO 8601 UTC;sim;—;momento da decisão;2026-10-17T16:29:12.308Z;—
+AJUSTE;(mês);Fatura do ajuste;texto (chave do objeto ajustes);Mês/AAAA;sim;PK;mês atual;Outubro/2026;Escolhido ao lançar o ajuste.
+AJUSTE;key;Inconsistência;texto;chave do TRATAMENTO;sim;PK;—;Parcelas × meses lançados|p51;Uma inconsistência só pode ter um ajuste.
+AJUSTE;desc;Descrição;texto;compra – pago a mais/a menos;sim;—;gerado pelo app;Cheiro de Menina (07/05/2024) – id 51 – pago a menos;—
+AJUSTE;valor;Valor do ajuste;número;"reais, 2 casas; positivo soma à fatura, negativo subtrai";sim;—;−(soma das parcelas − total);1036.67;Entra na fatura, nos saldos, na dívida e nos relatórios.
+AJUSTE;origem;Categoria;texto;categoria da inconsistência;sim;—;—;Parcelas × meses lançados;—
+AJUSTE;by;Quem lançou;texto;e-mail;sim;FK → USUARIO;usuário logado;kovags@gmail.com;Permissão Inconsistências.
+AJUSTE;ts;Quando;texto;ISO 8601 UTC;sim;—;momento do lançamento;2026-10-20T07:48:44Z;Remover o ajuste reabre a inconsistência.
 ANEXO;(id);Identificador;texto (id do documento);"""a"" + data em base 36 + 5 caracteres aleatórios";sim;PK;gerado pelo app;amvbeugg98xrzo;Único.
 ANEXO;nome;Nome do arquivo;texto;livre;sim;—;nome enviado;compra1.png;—
 ANEXO;tipo;Tipo do arquivo;texto;image/jpeg | application/pdf;sim;—;—;image/jpeg;Fotos são convertidas para JPEG.
