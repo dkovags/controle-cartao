@@ -502,7 +502,7 @@ function Incons({ps,baixas,incOk,setIncOk,user,ajustes,setAjustes,am}){
     const novos=ajSel.map(({i,x})=>({key:i.key,desc:`${i.title} – ${x.v<0?"pago a menos":"pago a mais"}`,valor:Math.round(-x.v*100)/100,origem:i.cat,by,ts}));
     setAjustes(a=>({...a,[ajMes]:[...(a[ajMes]||[]),...novos]}));
     setIncOk(o=>{const n={...o};ajSel.forEach(({i})=>{n[i.key]={by,ts,label:`${i.cat}: ${i.title} (ajuste lançado em ${ajMes})`};});return n;});};
-  const mesesAj=(()=>{const c=cmk();const s=new Set([...am,c]);const ci=MO.indexOf(c);for(let k=1;k<=3;k++)if(MO[ci+k])s.add(MO[ci+k]);return MO.filter(m=>s.has(m)&&MO.indexOf(m)>=ci-1).reverse();})();
+  const mesesAj=(()=>{const c=cmk();const s=new Set([...am,c]);const ci=MO.indexOf(c);for(let k=1;k<=3;k++)if(MO[ci+k])s.add(MO[ci+k]);return MO.filter(m=>s.has(m)&&MO.indexOf(m)>=ci).reverse();})();
   const card={background:Z.cd,border:`1px solid ${Z.bd}`,borderRadius:10,padding:16,marginBottom:18};
   const btn={background:`linear-gradient(135deg,${Z.ac3},${Z.ac2})`,color:"#fff",border:"none",borderRadius:6,padding:"7px 14px",fontSize:11,fontWeight:600,cursor:"pointer",fontFamily:Z.ft};
   const btn2={background:Z.cd2,color:Z.tx2,border:`1px solid ${Z.bd}`,borderRadius:6,padding:"7px 12px",fontSize:11,cursor:"pointer",fontFamily:Z.ft};
