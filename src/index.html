@@ -1112,14 +1112,15 @@ function parseReceipt(text,kind,lojas){
   for(let i=0;i<U.length&&valor==null;i++){if(kwTot.test(U[i])&&!/PARCELA|TROCO|DESCONTO|TAXA|JUROS/.test(U[i])){let v=vals(i);if(!v.length&&i+1<lines.length)v=vals(i+1);if(v.length)valor=v[v.length-1];}}
   if(valor==null){const all=lines.flatMap((_,i)=>vals(i));if(all.length)valor=Math.max(...all);}
   if(valor!=null)out.valor=Math.round(valor*100)/100;
-  // data: dd/mm/aaaa, dd/mm/aa, dd.mm.aaaa, dd-mm-aaaa
+  // data: dd/mm/aaaa, dd/mm/aa, dd.mm.aaaa, dd-mm-aaaa e por extenso ("19 out 2026", "19/OUT/26", "15 de outubro de 2026")
   const kwData=kind==="baixa"?/(PAGAMENTO|PAGO EM|REALIZAD|EFETUAD|DATA)/:/(DATA|EMISSAO|COMPRA)/;
   const dRe=/(\d{2})\s?[\/.\-]\s?(\d{2})\s?[\/.\-]\s?(\d{4}|\d{2})(?!\d)/;
-  const okD=(d,m,y)=>{y=y.length===2?"20"+y:y;const D=+d,M=+m,Y=+y;if(M<1||M>12||D<1||D>31||Y<2015||Y>2100)return null;return`${d}/${m}/${y}`;};
-  const findDate=(pred)=>{for(let i=0;i<U.length;i++){if(!pred(i))continue;for(const j of[i,i+1]){if(j>=lines.length)continue;const m=lines[j].match(dRe);if(m){const r=okD(m[1],m[2],m[3]);if(r)return r;}}}return null;};
+  const MES3=["JAN","FEV","MAR","ABR","MAI","JUN","JUL","AGO","SET","OUT","NOV","DEZ"];
+  const eRe=/(?:^|[^\d])(\d{1,2})\s*(?:DE\s+|[\/.\-]\s*)?(JAN|FEV|MAR|ABR|MAI|JUN|JUL|AGO|SET|OUT|NOV|DEZ)[A-Z]*\.?\s*(?:DE\s+|[\/.\-]\s*)?(\d{4}|\d{2})(?!\d)/;
+  const okD=(d,m,y)=>{y=y.length===2?"20"+y:y;const D=+d,M=+m,Y=+y;if(M<1||M>12||D<1||D>31||Y<2015||Y>2100)return null;return`${String(D).padStart(2,"0")}/${String(M).padStart(2,"0")}/${y}`;};
+  const dateIn=j=>{const m=lines[j].match(dRe);if(m){const r=okD(m[1],m[2],m[3]);if(r)return r;}const e=U[j].match(eRe);if(e){const r=okD(e[1],String(MES3.indexOf(e[2])+1),e[3]);if(r)return r;}return null;};
+  const findDate=(pred)=>{for(let i=0;i<U.length;i++){if(!pred(i))continue;for(const j of[i,i+1]){if(j>=lines.length)continue;const r=dateIn(j);if(r)return r;}}return null;};
   out.data=findDate(i=>kwData.test(U[i]))||findDate(()=>true)||undefined;
-  // texto por extenso: "15 de outubro de 2026"
-  if(!out.data){const mes=["JANEIRO","FEVEREIRO","MARCO","ABRIL","MAIO","JUNHO","JULHO","AGOSTO","SETEMBRO","OUTUBRO","NOVEMBRO","DEZEMBRO"];for(const u of U){const m=u.match(/(\d{1,2})\s+DE\s+([A-Z]+)\s+DE\s+(\d{4})/);if(m&&mes.includes(m[2])){out.data=`${m[1].padStart(2,"0")}/${String(mes.indexOf(m[2])+1).padStart(2,"0")}/${m[3]}`;break;}}}
   if(!out.data)delete out.data;
   if(kind!=="baixa"){
     // parcelas: "3X", "EM 3 PARCELAS", "PARCELADO 3", "QTD PARCELAS: 3"
@@ -1131,7 +1132,7 @@ function parseReceipt(text,kind,lojas){
     const known=(lojas||[]).map(l=>({l,k:nrmTxt(l).replace(/[^A-Z0-9 ]/g," ").replace(/\s+/g," ").trim()})).filter(x=>x.k.length>=3).sort((a,b)=>b.k.length-a.k.length);
     const hit=known.find(x=>full.replace(/\s+/g," ").includes(x.k));
     if(hit)out.loja=hit.l;
-    else{const bad=/(CNPJ|CPF|COMPROVANTE|VIA|CLIENTE|ESTABELECIMENTO|CARTAO|CREDITO|DEBITO|VISA|MASTER|ELO|DATA|HORA|VALOR|TOTAL|AUTORIZ|TERMINAL|NSU|DOC|CUPOM|FISCAL|NOTA|ENDERECO|RUA|AV\b|TEL|R\$|\d{4})/;
+    else{const bad=/(CNPJ|CPF|COMPROVANTE|VIA|CLIENTE|PARCEL|PIX|TRANSFER|PAGAMENTO|REALIZAD|ESTABELECIMENTO|CARTAO|CREDITO|DEBITO|VISA|MASTER|ELO|DATA|HORA|VALOR|TOTAL|AUTORIZ|TERMINAL|NSU|DOC|CUPOM|FISCAL|NOTA|ENDERECO|RUA|AV\b|TEL|R\$|\d{4})/;
       for(let i=0;i<Math.min(U.length,8);i++){const u=U[i];if(bad.test(u))continue;const letters=(u.match(/[A-Z]/g)||[]).length;if(letters>=3&&letters/u.length>.5){out.loja=lines[i].replace(/\s+/g," ").toLowerCase().replace(/(^|\s)\S/g,c=>c.toUpperCase()).trim();break;}}}
   }
   return out;
