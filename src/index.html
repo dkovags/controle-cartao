@@ -785,6 +785,10 @@ function App(){
       }finally{setSaving(false);}
     },.8e3);},[ps,ppl,baixas,incOk,corr,ajustes,ok]);
   const tt=(m,ms=2e3)=>{setToast(m);setTimeout(()=>setToast(null),ms);};
+  // aviso de versão nova publicada (o navegador pode manter a página antiga em cache)
+  const[novaVer,setNovaVer]=useState(null);
+  useEffect(()=>{if(APP_VERSION.startsWith("__"))return;const chk=()=>fetch(location.pathname+"?v="+Date.now(),{cache:"no-store"}).then(r=>r.ok?r.text():"").then(t=>{const v=(/APP_VERSION *= *"([^"]+)"/.exec(t)||[])[1];if(v&&v!==APP_VERSION)setNovaVer(v);}).catch(()=>{});
+    chk();const iv=setInterval(chk,5*60e3);const vis=()=>{if(document.visibilityState==="visible")chk();};document.addEventListener("visibilitychange",vis);return()=>{clearInterval(iv);document.removeEventListener("visibilitychange",vis);};},[]);
   const am=useMemo(()=>{const s=new Set([cmk()]);ps.forEach(p=>Object.keys(p.monthly).forEach(m=>s.add(m)));Object.keys(baixas).forEach(m=>{if((baixas[m]||[]).length)s.add(m);});return MO.filter(m=>s.has(m));},[ps,baixas]);
   const mt=useMemo(()=>{const t={};am.forEach(m=>{t[m]=0;});ps.forEach(p=>Object.entries(p.monthly).forEach(([m,v])=>{t[m]=(t[m]||0)+v;}));Object.entries(ajustes).forEach(([m,l])=>(l||[]).forEach(x=>{t[m]=(t[m]||0)+x.valor;}));return t;},[ps,am,ajustes]);
   const cmp=useMemo(()=>ps.filter(p=>p.monthly[sm]>0),[ps,sm]);
@@ -872,6 +876,7 @@ function App(){
       {[["dashboard","Dashboard"],["purchases","Compras"],["baixas","Baixas"],/*["people","Terceiros"],*/["reports","Gráficos"],["relatorios","Relatórios"],...(P.inconsistencias?[["incons","Inconsistências"]]:[]),["history","Histórico"],...(P.usuarios?[["usuarios","Usuários"]]:[]),...(isAdmin?[["correcoes",corrPend?`Correções (${corrPend})`:"Correções"]]:[])].map(([id,lb])=>(<button key={id} onClick={()=>setTab(id)} style={{background:tab===id?Z.cd2:"transparent",color:tab===id?Z.ac:Z.tx2,border:"none",borderBottom:tab===id?`2px solid ${Z.ac2}`:"2px solid transparent",padding:"10px 13px",fontSize:11,fontWeight:500,cursor:"pointer"}}>{lb}</button>))}
     </nav>
 
+    {novaVer&&<div style={{display:"flex",gap:10,alignItems:"center",justifyContent:"center",flexWrap:"wrap",padding:"8px 18px",background:`${Z.yl}18`,borderBottom:`1px solid ${Z.yl}50`,fontSize:12,color:Z.tx}}><span>Há uma versão nova do app ({novaVer}).</span><button onClick={()=>location.reload()} style={{background:Z.yl,color:"#111",border:"none",borderRadius:6,padding:"5px 12px",fontSize:12,fontWeight:700,cursor:"pointer"}}>Atualizar agora</button></div>}
     <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",padding:"6px 18px",background:Z.bg,borderBottom:`1px solid ${Z.bd}`,fontSize:10,color:Z.tx3,flexWrap:"wrap",gap:4}}>
       <span>Fechamento da fatura: <span style={{color:Z.yl,fontWeight:600}}>dia 19 de cada mês</span> <span style={{marginLeft:6,opacity:.7}}>· versão {APP_VERSION}</span></span>
       <span>Última atualização: <span style={{color:Z.ac,fontFamily:Z.mn}}>{lastUpdate?new Date(lastUpdate).toLocaleString("pt-BR",{day:"2-digit",month:"2-digit",year:"numeric",hour:"2-digit",minute:"2-digit"}):"—"}</span></span>
