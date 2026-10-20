@@ -489,7 +489,13 @@ function Incons({ps,baixas,incOk,setIncOk,user,ajustes,setAjustes,am}){
   const selList=list.filter(i=>sel[i.key]);
   // ao abrir ou trocar de filtro, a lista exibida vem toda selecionada; marcar "Tratada" não mexe na seleção
   useEffect(()=>{setSel(Object.fromEntries(list.map(i=>[i.key,true])));},[filtro,sev]);
-  const toggleOk=i=>setIncOk(o=>{const n={...o};if(n[i.key])delete n[i.key];else n[i.key]={by:user?.email||"",ts:new Date().toISOString(),label:`${i.cat}: ${i.title}`};return n;});
+  const ajusteDe=k=>{for(const[m,l]of Object.entries(ajustes||{})){const x=(l||[]).find(x=>x.key===k);if(x)return{m,x};}return null;};
+  const tirarAjuste=k=>setAjustes(a=>{const n={};Object.entries(a||{}).forEach(([m,l])=>{const r=(l||[]).filter(x=>x.key!==k);if(r.length)n[m]=r;});return n;});
+  // reabrir um erro com ajuste lançado remove o ajuste junto (senão a fatura ficaria com o ajuste e o erro pendente)
+  const toggleOk=i=>{const aj=ajusteDe(i.key);
+    if(incOk[i.key]&&aj){if(!confirm(`Esta inconsistência tem ajuste lançado em ${aj.m} (${aj.x.valor>=0?"+":"−"} ${fB(Math.abs(aj.x.valor))}).\nAo reabrir, o ajuste sai da fatura de ${aj.m}. Continuar?`))return;tirarAjuste(i.key);}
+    setIncOk(o=>{const n={...o};if(n[i.key])delete n[i.key];else n[i.key]={by:user?.email||"",ts:new Date().toISOString(),label:`${i.cat}: ${i.title}${aj?` (ajuste lançado em ${aj.m})`:""}`};return n;});};
+  const removerAjuste=i=>{const aj=ajusteDe(i.key);if(!aj||!confirm(`Remover o ajuste de ${aj.m} (${aj.x.valor>=0?"+":"−"} ${fB(Math.abs(aj.x.valor))})?`))return;tirarAjuste(i.key);};
   const nErr=pend.filter(i=>i.sev==="Erro").length,nAt=pend.length-nErr;
   // Ajuste: leva o valor pago a mais/a menos da inconsistência para a fatura de um mês (pago a menos soma; pago a mais subtrai)
   const[ajMes,setAjMes]=useState(cmk());
@@ -534,6 +540,7 @@ function Incons({ps,baixas,incOk,setIncOk,user,ajustes,setAjustes,am}){
         <button onClick={()=>setExp(e=>({...e,[i.key]:!e[i.key]}))} style={{background:"none",border:"none",color:Z.ac,fontSize:10,padding:"3px 0 0",cursor:"pointer",fontFamily:Z.ft}}>{exp[i.key]?"▾ Ocultar análise":"▸ Ver análise"}</button>
         {exp[i.key]&&<div style={{marginTop:4,padding:"7px 9px",background:Z.cd2,borderLeft:`3px solid ${Z.ac3}`,borderRadius:4,color:Z.tx,fontSize:10.5,lineHeight:1.5}}>{explainIncon(i,ps,baixas)}</div>}
         {ok&&<div style={{color:Z.gn,fontSize:10,marginTop:3}}>Tratada em {fmt(ok.ts)}{ok.by?` por ${ok.by}`:""}</div>}
+        {(()=>{const aj=ajusteDe(i.key);return aj&&<div style={{display:"flex",gap:8,alignItems:"center",flexWrap:"wrap",fontSize:10,marginTop:4,color:Z.yl}}><span>Ajuste lançado na fatura de {aj.m}: <b style={{color:vCor(-aj.x.valor)}}>{aj.x.valor>=0?"+":"−"} {fB(Math.abs(aj.x.valor))}</b></span><button onClick={()=>removerAjuste(i)} style={{...btn2,padding:"2px 8px",fontSize:10}}>Remover ajuste</button></div>;})()}
       </div>
     </div>);})}
     {!list.length&&<div style={{fontSize:11,color:Z.gn,padding:"8px 0"}}>{filtro==="trat"?"Nenhuma inconsistência tratada ainda.":"Nenhuma inconsistência pendente."}</div>}
