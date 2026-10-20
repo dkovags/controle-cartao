@@ -20,6 +20,8 @@ erDiagram
     AMBIENTE ||--o{ TERCEIRO : "people"
     AMBIENTE ||--o{ ALTERACAO : "history"
     AMBIENTE ||--o{ TRATAMENTO : "incOk"
+    AMBIENTE ||--o{ AJUSTE : "ajustes (por mês de fatura)"
+    TRATAMENTO ||--o| AJUSTE : "key"
     AMBIENTE ||--o{ ANEXO : "subcoleção anexos"
     AMBIENTE ||--o{ USUARIO : "subcoleção usuarios"
     AMBIENTE ||--o{ PERFIL : "subcoleção perfis"
@@ -35,6 +37,7 @@ erDiagram
         string history "JSON: Alteracao[] (últimas 500)"
         string incOk "JSON: { chave: Tratamento }"
         string corr "JSON: { idPacote: Decisao } (menu Correções)"
+        string ajustes "JSON: { mes: Ajuste[] }"
         string updatedAt "ISO 8601, última alteração real"
         int rev "versão, sobe 1 a cada gravação"
     }
@@ -67,6 +70,14 @@ erDiagram
         string by "e-mail de quem marcou"
         string ts "ISO 8601"
         string label "categoria e item"
+    }
+    AJUSTE {
+        string key "chave da inconsistência (TRATAMENTO)"
+        string desc "descrição exibida na fatura"
+        number valor "positivo soma, negativo subtrai"
+        string origem "categoria da inconsistência"
+        string by "e-mail de quem lançou"
+        string ts "ISO 8601"
     }
     ANEXO {
         string nome "nome do arquivo enviado"
@@ -110,6 +121,7 @@ erDiagram
 | `history` | texto (JSON) | lista de **Alteração**, da mais antiga para a mais recente; guarda as 500 últimas |
 | `incOk` | texto (JSON) | objeto de inconsistências marcadas como tratadas (chave → **Tratamento**) |
 | `corr` | texto (JSON) | correções do menu **Correções** já decididas: id do pacote → `{ status: aplicada\|recusada, titulo, by, ts }`; os pacotes ficam em `correcoes/` no repositório |
+| `ajustes` | texto (JSON) | objeto cujas chaves são meses de fatura e os valores, listas de **Ajuste** de inconsistência (somados ao total da fatura) |
 | `updatedAt` | texto | data e hora (ISO 8601, UTC) da última alteração real dos dados |
 | `rev` | inteiro | versão do documento; a gravação só é aceita se ninguém gravou antes (controle de concorrência) |
 
@@ -153,6 +165,22 @@ ou `"Possível baixa duplicada|Agosto/2024|14/08/2024|3000"` (mês, data e valor
 { "Parcelas × meses lançados|p51": { "by": "kovags@gmail.com", "ts": "2026-10-16T13:04:00Z",
   "label": "Parcelas × meses lançados: Cheiro de Menina (07/05/2024) – id 51" } }
 ```
+
+### Ajuste de inconsistência (`ajustes`)
+
+Lançado no menu **Inconsistências** (botão **Lançar ajuste**) para acertar erros do passado na
+fatura de um mês escolhido. O valor é o inverso do impacto: o que foi pago a menos entra
+positivo (soma à fatura) e o que foi pago a mais entra negativo (abate). Ao lançar, a
+inconsistência é marcada como tratada; ao remover o ajuste (✕ em Parcelas do Mês), volta a ficar pendente.
+
+```json
+{ "Outubro/2026": [ { "key": "Parcelas × meses lançados|p51",
+  "desc": "Parcelas × meses lançados: Cheiro de Menina (07/05/2024) – pago a menos",
+  "valor": 1036.67, "origem": "Parcelas × meses lançados",
+  "by": "kovags@gmail.com", "ts": "2026-10-20T12:00:00Z" } ] }
+```
+
+Os ajustes entram no total da fatura, na dívida total (meses a partir do atual), no relatório mensal e no histórico.
 
 As inconsistências em si não são gravadas: são recalculadas pelo app a partir dos dados.
 
