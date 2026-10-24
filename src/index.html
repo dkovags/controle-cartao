@@ -749,7 +749,7 @@ function App(){
   },[]);
 
   // Dados: escuta o Firestore em tempo real (todas as telas abertas ficam sincronizadas)
-  const svRef=useRef(null);const baseRef=useRef(null);const revRef=useRef(-1);const tr=useRef(null);
+  const svRef=useRef(null);const baseRef=useRef(null);const revRef=useRef(-1);const tr=useRef(null);const busy=useRef(false);const remPend=useRef(null);
   const applyRemote=(d)=>{
     if(d.rev<=revRef.current)return;
     revRef.current=d.rev;baseRef.current={purchases:d.purchases,people:d.people,baixas:d.baixas,incOk:d.incOk,corr:d.corr,ajustes:d.ajustes};
@@ -764,6 +764,7 @@ function App(){
       unsub=ref.onSnapshot(snap=>{
         if(!snap.exists){setLoadErr("Base de dados não encontrada");return;}
         const d=parseDoc(snap.data());
+        if(busy.current){remPend.current=d;return;}
         if(okRef.current&&d.rev>revRef.current&&JSON.stringify({purchases:d.purchases,people:d.people,baixas:d.baixas,incOk:d.incOk,corr:d.corr,ajustes:d.ajustes})!==JSON.stringify({purchases:ps0.current,people:ppl0.current,baixas:bx0.current,incOk:inc0.current,corr:cor0.current,ajustes:aj0.current}))tt("Dados atualizados em outro dispositivo");
         applyRemote(d);
       },e=>setLoadErr(String(e?.code||e?.message||e)));
@@ -774,7 +775,8 @@ function App(){
 
   // Gravação automática (só admin): só quando algo mudou de fato, com histórico
   useEffect(()=>{if(!ok||!canEdit)return;const snap=JSON.stringify({purchases:ps,people:ppl,baixas,incOk,corr,ajustes});if(snap===svRef.current)return;if(tr.current)clearTimeout(tr.current);
-    tr.current=setTimeout(async()=>{tr.current=null;const next={purchases:ps,people:ppl,baixas,incOk,corr,ajustes};const changes=diffData(baseRef.current,next);const ops=opsData(baseRef.current,next);setSaving(true);
+    // gravações em fila: com uma em andamento, espera ela terminar (senão a seguinte usaria a versão antiga e daria conflito)
+    const fire=async()=>{if(busy.current){tr.current=setTimeout(fire,300);return;}tr.current=null;busy.current=true;const next={purchases:ps,people:ppl,baixas,incOk,corr,ajustes};const changes=diffData(baseRef.current,next);const ops=opsData(baseRef.current,next);setSaving(true);
       try{
         if(!initFB()){const now=new Date().toISOString();await svLocal({...next,updatedAt:now});svRef.current=snap;baseRef.current=next;setLastUpdate(now);setHistory(h=>changes.length?[...h,{ts:now,user:user.email,changes}]:h);tt("Salvo localmente");return;}
         const r=await saveTx(next,Math.max(revRef.current,0),changes,user.email);
@@ -782,8 +784,10 @@ function App(){
       }catch(e){
         if(e?.code==="conflict"){tt("Os dados foram alterados em outro dispositivo. Sua última alteração não foi salva; confira e refaça.",6e3);const s2=await initFB().doc(DOC_PATH).get();revRef.current=-1;applyRemote(parseDoc(s2.data()));}
         else tt("Erro ao salvar: "+(e?.code||e?.message||e),6e3);
-      }finally{setSaving(false);}
-    },.8e3);},[ps,ppl,baixas,incOk,corr,ajustes,ok]);
+      }finally{busy.current=false;setSaving(false);const d=remPend.current;remPend.current=null;
+        // snapshot recebido durante a gravação: só aplica se veio de outro dispositivo (versão mais nova que a gravada)
+        if(d&&d.rev>revRef.current){tt("Dados atualizados em outro dispositivo");applyRemote(d);}}
+    };tr.current=setTimeout(fire,.8e3);},[ps,ppl,baixas,incOk,corr,ajustes,ok]);
   const tt=(m,ms=2e3)=>{setToast(m);setTimeout(()=>setToast(null),ms);};
   // aviso de versão nova publicada (o navegador pode manter a página antiga em cache)
   const[novaVer,setNovaVer]=useState(null);
