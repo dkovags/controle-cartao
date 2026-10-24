@@ -97,7 +97,7 @@ const pJ=v=>typeof v==="string"?JSON.parse(v):v;
 function parseDoc(d){
   const baixas=pJ(d.baixas)||{};
   Object.keys(SEED_BX).forEach(m=>{if(!baixas[m])baixas[m]=SEED_BX[m];});
-  return{purchases:pJ(d.purchases)||[],people:pJ(d.people)||{},baixas,updatedAt:d.updatedAt||null,rev:d.rev||0,history:pJ(d.history)||[],incOk:pJ(d.incOk)||{},corr:pJ(d.corr)||{}};
+  return{purchases:pJ(d.purchases)||[],people:pJ(d.people)||{},baixas,updatedAt:d.updatedAt||null,rev:d.rev||0,history:pJ(d.history)||[],incOk:pJ(d.incOk)||{},corr:pJ(d.corr)||{},ajustes:pJ(d.ajustes)||{}};
 }
 // Primeiro acesso à homologação: copia os dados da produção
 async function prepDoc(){
@@ -114,7 +114,7 @@ async function saveTx(next,baseRev,changes,who){
     const hist=s.exists?(pJ(s.data().history)||[]):[];const now=new Date().toISOString();
     if(changes.length)hist.push({ts:now,user:who,changes});
     while(hist.length>500)hist.shift();
-    t.set(ref,{purchases:JSON.stringify(next.purchases),people:JSON.stringify(next.people),baixas:JSON.stringify(next.baixas),incOk:JSON.stringify(next.incOk||{}),corr:JSON.stringify(next.corr||{}),updatedAt:now,rev:cur+1,history:JSON.stringify(hist)});
+    t.set(ref,{purchases:JSON.stringify(next.purchases),people:JSON.stringify(next.people),baixas:JSON.stringify(next.baixas),incOk:JSON.stringify(next.incOk||{}),corr:JSON.stringify(next.corr||{}),ajustes:JSON.stringify(next.ajustes||{}),updatedAt:now,rev:cur+1,history:JSON.stringify(hist)});
     return{rev:cur+1,now,hist};
   });
 }
@@ -150,6 +150,7 @@ function diffData(a,b){
   const ia=a.incOk||{},ib=b.incOk||{};
   Object.keys(ib).forEach(k=>{if(!ia[k])out.push(`Inconsistência marcada como tratada: ${ib[k].label||k}`);});
   Object.keys(ia).forEach(k=>{if(!ib[k])out.push(`Inconsistência reaberta: ${ia[k].label||k}`);});
+  const ja=a.ajustes||{},jb=b.ajustes||{};new Set([...Object.keys(ja),...Object.keys(jb)]).forEach(m=>{const ka=new Set((ja[m]||[]).map(x=>x.key)),kb=new Set((jb[m]||[]).map(x=>x.key));(jb[m]||[]).forEach(x=>{if(!ka.has(x.key))out.push(`Ajuste lançado em ${m}: ${x.desc} – ${x.valor>=0?"+":"−"} ${fB(Math.abs(x.valor))}`);});(ja[m]||[]).forEach(x=>{if(!kb.has(x.key))out.push(`Ajuste removido de ${m}: ${x.desc} – ${x.valor>=0?"+":"−"} ${fB(Math.abs(x.valor))}`);});});
   const ca=a.corr||{},cb=b.corr||{};Object.keys(cb).forEach(k=>{if(!ca[k])out.unshift(cb[k].status==="aplicada"?`Correção aplicada: ${cb[k].titulo} (preparada pelo Claude)`:`Correção recusada: ${cb[k].titulo} (preparada pelo Claude)`);});
   new Set([...Object.keys(a.people),...Object.keys(b.people)]).forEach(n=>{if(JSON.stringify(a.people[n])!==JSON.stringify(b.people[n]))out.push(`Terceiros alterados: ${n}`);});
   return out;
@@ -277,15 +278,15 @@ function ReportDoc({title,comp,children}){
   </table>);
 }
 // Folha do mês: lançamentos e/ou baixas
-function MonthSheet({sm,ps,baixas,mt,showL,showB,incErr}){
+function MonthSheet({sm,ps,baixas,mt,showL,showB,incErr,ajustes}){
   const rows=ps.filter(p=>p.monthly[sm]>0).sort((a,b)=>dKey(b)-dKey(a)).map(p=>{const k=Object.keys(p.monthly).sort((x,y)=>MO.indexOf(x)-MO.indexOf(y));return{...p,v:p.monthly[sm],n:k.indexOf(sm)+1,N:Math.max(p.parcelas||0,k.length)};});
   const tot=mt[sm]||0;const bx=baixas[sm]||[];const tb=bx.reduce((s,b)=>s+b.amount,0);
   const title=monthTitle(showL,showB);
   return(<ReportDoc title={title} comp={sm}>
-    {showL&&(rows.length?(<table style={{width:"100%",borderCollapse:"collapse"}}>
+    {showL&&(rows.length||((ajustes||{})[sm]||[]).length?(<table style={{width:"100%",borderCollapse:"collapse"}}>
       <thead><tr><th style={pTh}>Data da compra</th><th style={pTh}>Loja</th><th style={{...pTh,textAlign:"center"}}>Parcela</th><th style={{...pTh,...pR}}>Valor</th></tr></thead>
-      <tbody>{rows.map(p=>(<tr key={p.id}><td style={pTd}>{fD(p.data)}</td><td style={pTd}>{p.loja}</td><td style={{...pTd,textAlign:"center"}}>{p.n}/{p.N}</td><td style={{...pTd,...pR}}>{fB(p.v)}</td></tr>))}</tbody>
-      <tfoot><tr><td style={pTf} colSpan={3}>Total do mês ({rows.length} lançamento{rows.length!==1?"s":""})</td><td style={{...pTf,...pR}}>{fB(tot)}</td></tr></tfoot>
+      <tbody>{rows.map(p=>(<tr key={p.id}><td style={pTd}>{fD(p.data)}</td><td style={pTd}>{p.loja}</td><td style={{...pTd,textAlign:"center"}}>{p.n}/{p.N}</td><td style={{...pTd,...pR}}>{fB(p.v)}</td></tr>))}{((ajustes||{})[sm]||[]).map(x=>(<tr key={x.key}><td style={pTd}>—</td><td style={pTd}><b>Ajuste de inconsistência:</b> {x.desc}</td><td style={{...pTd,textAlign:"center"}}>—</td><td style={{...pTd,...pR,fontWeight:700,color:vCor(-x.valor)}}>{x.valor>=0?"+":"−"} {fB(Math.abs(x.valor))}</td></tr>))}</tbody>
+      <tfoot><tr><td style={pTf} colSpan={3}>Total do mês ({rows.length} lançamento{rows.length!==1?"s":""}{((ajustes||{})[sm]||[]).length?` e ${(ajustes[sm]).length} ajuste${ajustes[sm].length>1?"s":""}`:""})</td><td style={{...pTf,...pR}}>{fB(tot)}</td></tr></tfoot>
     </table>):(<div style={{fontSize:11,color:"#555"}}>Nenhum lançamento neste mês.</div>))}
     {showB&&(<div style={{marginTop:showL?24:0}}>
       {showL&&<div style={{fontSize:14,fontWeight:700,marginBottom:6}}>Baixas – {sm}</div>}
@@ -319,10 +320,10 @@ function MonthSheet({sm,ps,baixas,mt,showL,showB,incErr}){
   </ReportDoc>);
 }
 // Impressão rápida do Dashboard: lançamentos, com opção de incluir as baixas
-function PrintMonth({sm,ps,baixas,mt,onClose}){
+function PrintMonth({sm,ps,baixas,mt,onClose,ajustes}){
   const[withBx,setWithBx]=useState(false);
   return(<PrintShell docName={pdfName(monthTitle(true,withBx),sm)} onClose={onClose} controls={<label style={{display:"flex",alignItems:"center",gap:8,fontSize:12,color:Z.tx,cursor:"pointer"}}><input type="checkbox" checked={withBx} onChange={e=>setWithBx(e.target.checked)} style={{width:16,height:16,accentColor:Z.ac2}}/>Incluir as baixas do mês</label>}>
-    <MonthSheet {...{sm,ps,baixas,mt}} showL={true} showB={withBx}/>
+    <MonthSheet {...{sm,ps,baixas,mt,ajustes}} showL={true} showB={withBx}/>
   </PrintShell>);
 }
 
@@ -455,7 +456,7 @@ function IncSheet({items,ps,baixas}){
   </ReportDoc>);
 }
 // Aba Relatórios
-function Relat({ps,baixas,mt,am,incOk,isAdmin}){
+function Relat({ps,baixas,mt,am,incOk,isAdmin,ajustes}){
   const months=[...am].reverse();
   const[m,setM]=useState(am.includes(cmk())?cmk():months[0]);const[tipo,setTipo]=useState("ambos");const[open,setOpen]=useState(null);const[comInc,setComInc]=useState(false);
   // erros pendentes com valor (cada compra/mês uma vez)
@@ -474,12 +475,12 @@ function Relat({ps,baixas,mt,am,incOk,isAdmin}){
       {isAdmin&&<label style={{display:"flex",alignItems:"center",gap:8,fontSize:12,color:Z.tx,cursor:"pointer",marginBottom:14}}><input type="checkbox" checked={comInc} onChange={e=>setComInc(e.target.checked)} style={{width:16,height:16,accentColor:Z.ac2}}/>Incluir os valores das inconsistências do tipo erro</label>}
       <button onClick={()=>setOpen("mes")} style={btn}>Visualizar e imprimir</button>
     </div>
-    {open==="mes"&&<PrintShell docName={pdfName(monthTitle(tipo!=="bx",tipo!=="lanc"),m)} onClose={()=>setOpen(null)}><MonthSheet sm={m} {...{ps,baixas,mt}} showL={tipo!=="bx"} showB={tipo!=="lanc"} incErr={isAdmin&&comInc?incErr:null}/></PrintShell>}
+    {open==="mes"&&<PrintShell docName={pdfName(monthTitle(tipo!=="bx",tipo!=="lanc"),m)} onClose={()=>setOpen(null)}><MonthSheet sm={m} {...{ps,baixas,mt,ajustes}} showL={tipo!=="bx"} showB={tipo!=="lanc"} incErr={isAdmin&&comInc?incErr:null}/></PrintShell>}
   </div>);
 }
 
 // Aba Inconsistências (só admin): seleção para impressão e marcação de tratadas
-function Incons({ps,baixas,incOk,setIncOk,user}){
+function Incons({ps,baixas,incOk,setIncOk,user,ajustes,setAjustes,am}){
   const all=useMemo(()=>findIncons(ps,baixas),[ps,baixas]);
   const[filtro,setFiltro]=useState("pend");const[sev,setSev]=useState("all");const[sel,setSel]=useState({});const[exp,setExp]=useState({});const[open,setOpen]=useState(false);
   const pend=all.filter(i=>!incOk[i.key]);const trat=all.filter(i=>incOk[i.key]);
@@ -488,8 +489,26 @@ function Incons({ps,baixas,incOk,setIncOk,user}){
   const selList=list.filter(i=>sel[i.key]);
   // ao abrir ou trocar de filtro, a lista exibida vem toda selecionada; marcar "Tratada" não mexe na seleção
   useEffect(()=>{setSel(Object.fromEntries(list.map(i=>[i.key,true])));},[filtro,sev]);
-  const toggleOk=i=>setIncOk(o=>{const n={...o};if(n[i.key])delete n[i.key];else n[i.key]={by:user?.email||"",ts:new Date().toISOString(),label:`${i.cat}: ${i.title}`};return n;});
+  const ajusteDe=k=>{for(const[m,l]of Object.entries(ajustes||{})){const x=(l||[]).find(x=>x.key===k);if(x)return{m,x};}return null;};
+  const tirarAjuste=k=>setAjustes(a=>{const n={};Object.entries(a||{}).forEach(([m,l])=>{const r=(l||[]).filter(x=>x.key!==k);if(r.length)n[m]=r;});return n;});
+  // reabrir um erro com ajuste lançado remove o ajuste junto (senão a fatura ficaria com o ajuste e o erro pendente)
+  const toggleOk=i=>{const aj=ajusteDe(i.key);
+    if(incOk[i.key]&&aj){if(!confirm(`Esta inconsistência tem ajuste lançado em ${aj.m} (${aj.x.valor>=0?"+":"−"} ${fB(Math.abs(aj.x.valor))}).\nAo reabrir, o ajuste sai da fatura de ${aj.m}. Continuar?`))return;tirarAjuste(i.key);}
+    setIncOk(o=>{const n={...o};if(n[i.key])delete n[i.key];else n[i.key]={by:user?.email||"",ts:new Date().toISOString(),label:`${i.cat}: ${i.title}${aj?` (ajuste lançado em ${aj.m})`:""}`};return n;});};
+  const removerAjuste=i=>{const aj=ajusteDe(i.key);if(!aj||!confirm(`Remover o ajuste de ${aj.m} (${aj.x.valor>=0?"+":"−"} ${fB(Math.abs(aj.x.valor))})?`))return;tirarAjuste(i.key);};
   const nErr=pend.filter(i=>i.sev==="Erro").length,nAt=pend.length-nErr;
+  // Ajuste: leva o valor pago a mais/a menos da inconsistência para a fatura de um mês (pago a menos soma; pago a mais subtrai)
+  const[ajMes,setAjMes]=useState(cmk());
+  const jaAjustado=k=>Object.values(ajustes||{}).some(l=>(l||[]).some(x=>x.key===k));
+  const ajSel=(()=>{const seen={};return selList.filter(i=>i.sev==="Erro"&&!incOk[i.key]&&!jaAjustado(i.key)).map(i=>({i,x:impactIncon(i,ps,baixas)})).filter(e=>e.x&&!seen[e.x.ref]&&(seen[e.x.ref]=1));})();
+  const ajNet=ajSel.reduce((s,e)=>s-e.x.v,0);
+  const lancarAjustes=()=>{if(!ajSel.length)return;
+    if(!confirm(`Lançar ${ajSel.length} ajuste${ajSel.length>1?"s":""} na fatura de ${ajMes}?\nEfeito no total do mês: ${ajNet>=0?"+":"−"} ${fB(Math.abs(ajNet))}.\nAs inconsistências ficam marcadas como tratadas.`))return;
+    const ts=new Date().toISOString();const by=user?.email||"";
+    const novos=ajSel.map(({i,x})=>({key:i.key,desc:`${i.title} – ${x.v<0?"pago a menos":"pago a mais"}`,valor:Math.round(-x.v*100)/100,origem:i.cat,by,ts}));
+    setAjustes(a=>({...a,[ajMes]:[...(a[ajMes]||[]),...novos]}));
+    setIncOk(o=>{const n={...o};ajSel.forEach(({i})=>{n[i.key]={by,ts,label:`${i.cat}: ${i.title} (ajuste lançado em ${ajMes})`};});return n;});};
+  const mesesAj=(()=>{const c=cmk();const s=new Set([...am,c]);const ci=MO.indexOf(c);for(let k=1;k<=3;k++)if(MO[ci+k])s.add(MO[ci+k]);return MO.filter(m=>s.has(m)&&MO.indexOf(m)>=ci).reverse();})();
   const card={background:Z.cd,border:`1px solid ${Z.bd}`,borderRadius:10,padding:16,marginBottom:18};
   const btn={background:`linear-gradient(135deg,${Z.ac3},${Z.ac2})`,color:"#fff",border:"none",borderRadius:6,padding:"7px 14px",fontSize:11,fontWeight:600,cursor:"pointer",fontFamily:Z.ft};
   const btn2={background:Z.cd2,color:Z.tx2,border:`1px solid ${Z.bd}`,borderRadius:6,padding:"7px 12px",fontSize:11,cursor:"pointer",fontFamily:Z.ft};
@@ -507,6 +526,12 @@ function Incons({ps,baixas,incOk,setIncOk,user}){
       <button onClick={()=>setSel(s=>{const n={...s};const allSel=list.every(i=>n[i.key]);list.forEach(i=>{if(allSel)delete n[i.key];else n[i.key]=true;});return n;})} style={btn2}>{list.length&&list.every(i=>sel[i.key])?"Desmarcar":"Selecionar"} todas da lista</button>
       <button disabled={!selList.length} onClick={()=>setOpen(true)} style={{...btn,opacity:selList.length?1:.4,cursor:selList.length?"pointer":"not-allowed"}}>Imprimir selecionadas ({selList.length})</button>
     </div>
+    {ajSel.length>0&&<div style={{display:"flex",gap:8,alignItems:"center",flexWrap:"wrap",padding:"10px 12px",margin:"0 0 10px",background:`${Z.yl}12`,border:`1px solid ${Z.yl}50`,borderRadius:8,fontSize:11}}>
+      <span style={{color:Z.tx}}>Lançar {ajSel.length} ajuste{ajSel.length>1?"s":""} (erros selecionados) na fatura de</span>
+      <select value={ajMes} onChange={e=>setAjMes(e.target.value)} style={{...btn2,padding:"5px 8px"}}>{mesesAj.map(m=><option key={m} value={m}>{m}</option>)}</select>
+      <span style={{fontFamily:Z.mn,fontWeight:700,color:ajNet>=0?Z.rd:Z.gn}}>{ajNet>=0?"+":"−"} {fB(Math.abs(ajNet))}</span>
+      <button onClick={lancarAjustes} style={{...btn,padding:"6px 12px"}}>Lançar ajuste</button>
+    </div>}
     {list.map(i=>{const ok=incOk[i.key];return(<div key={i.key} style={{display:"flex",gap:10,alignItems:"flex-start",padding:"9px 0",borderTop:`1px solid ${Z.bd}`,fontSize:11,opacity:ok?.6:1}}>
       <input type="checkbox" title="Selecionar para impressão" checked={!!sel[i.key]} onChange={()=>setSel(s=>({...s,[i.key]:!s[i.key]}))} style={{width:16,height:16,marginTop:1,accentColor:Z.ac2,flexShrink:0}}/>
       <div style={{flex:1,minWidth:0}}>
@@ -515,6 +540,7 @@ function Incons({ps,baixas,incOk,setIncOk,user}){
         <button onClick={()=>setExp(e=>({...e,[i.key]:!e[i.key]}))} style={{background:"none",border:"none",color:Z.ac,fontSize:10,padding:"3px 0 0",cursor:"pointer",fontFamily:Z.ft}}>{exp[i.key]?"▾ Ocultar análise":"▸ Ver análise"}</button>
         {exp[i.key]&&<div style={{marginTop:4,padding:"7px 9px",background:Z.cd2,borderLeft:`3px solid ${Z.ac3}`,borderRadius:4,color:Z.tx,fontSize:10.5,lineHeight:1.5}}>{explainIncon(i,ps,baixas)}</div>}
         {ok&&<div style={{color:Z.gn,fontSize:10,marginTop:3}}>Tratada em {fmt(ok.ts)}{ok.by?` por ${ok.by}`:""}</div>}
+        {(()=>{const aj=ajusteDe(i.key);return aj&&<div style={{display:"flex",gap:8,alignItems:"center",flexWrap:"wrap",fontSize:10,marginTop:4,color:Z.yl}}><span>Ajuste lançado na fatura de {aj.m}: <b style={{color:vCor(-aj.x.valor)}}>{aj.x.valor>=0?"+":"−"} {fB(Math.abs(aj.x.valor))}</b></span><button onClick={()=>removerAjuste(i)} style={{...btn2,padding:"2px 8px",fontSize:10}}>Remover ajuste</button></div>;})()}
       </div>
     </div>);})}
     {!list.length&&<div style={{fontSize:11,color:Z.gn,padding:"8px 0"}}>{filtro==="trat"?"Nenhuma inconsistência tratada ainda.":"Nenhuma inconsistência pendente."}</div>}
@@ -696,7 +722,7 @@ function Hist({history}){
 
 function App(){
   const[user,setUser]=useState(null);const[role,setRole]=useState(null);const[authLoading,setAuthLoading]=useState(true);const[authError,setAuthError]=useState(null);const[access,setAccess]=useState(null);
-  const[ps,setPs]=useState([]);const[ppl,setPpl]=useState({});const[baixas,setBaixas]=useState({});const[ok,setOk]=useState(false);const[saving,setSaving]=useState(false);const[lastUpdate,setLastUpdate]=useState(null);const[loadErr,setLoadErr]=useState(null);const[history,setHistory]=useState([]);const[incOk,setIncOk]=useState({});const[corr,setCorr]=useState({});
+  const[ps,setPs]=useState([]);const[ppl,setPpl]=useState({});const[baixas,setBaixas]=useState({});const[ok,setOk]=useState(false);const[saving,setSaving]=useState(false);const[lastUpdate,setLastUpdate]=useState(null);const[loadErr,setLoadErr]=useState(null);const[history,setHistory]=useState([]);const[incOk,setIncOk]=useState({});const[corr,setCorr]=useState({});const[ajustes,setAjustes]=useState({});
   const[tab,setTab]=useState("dashboard");const[sm,setSm]=useState(cmk());const[sf,setSf]=useState(false);const[ep,setEp]=useState(null);const[sr,setSr]=useState("");const[toast,setToast]=useState(null);
   CUR_EMAIL=user?.email||"";
   const lojasList=useMemo(()=>[...new Set(ps.map(p=>p.loja))],[ps]);
@@ -726,29 +752,29 @@ function App(){
   const svRef=useRef(null);const baseRef=useRef(null);const revRef=useRef(-1);const tr=useRef(null);
   const applyRemote=(d)=>{
     if(d.rev<=revRef.current)return;
-    revRef.current=d.rev;baseRef.current={purchases:d.purchases,people:d.people,baixas:d.baixas,incOk:d.incOk,corr:d.corr};
+    revRef.current=d.rev;baseRef.current={purchases:d.purchases,people:d.people,baixas:d.baixas,incOk:d.incOk,corr:d.corr,ajustes:d.ajustes};
     svRef.current=JSON.stringify(baseRef.current);
     if(tr.current){clearTimeout(tr.current);tr.current=null;}
-    setPs(fixTrunc(d.purchases));setPpl(d.people);setBaixas(d.baixas);setIncOk(d.incOk);setCorr(d.corr);setHistory(d.history);setLastUpdate(d.updatedAt);setOk(true);
+    setPs(fixTrunc(d.purchases));setPpl(d.people);setBaixas(d.baixas);setIncOk(d.incOk);setCorr(d.corr);setAjustes(d.ajustes);setHistory(d.history);setLastUpdate(d.updatedAt);setOk(true);
   };
   useEffect(()=>{if(!user||!role)return;
-    if(!initFB()){(async()=>{const d=await ldLocal();const x=d||{purchases:SEED_P,people:SEED_PPL,baixas:SEED_BX,updatedAt:null,rev:0,history:[],incOk:{},corr:{}};revRef.current=-1;applyRemote(x);})();return;}
+    if(!initFB()){(async()=>{const d=await ldLocal();const x=d||{purchases:SEED_P,people:SEED_PPL,baixas:SEED_BX,updatedAt:null,rev:0,history:[],incOk:{},corr:{},ajustes:{}};revRef.current=-1;applyRemote(x);})();return;}
     let unsub=null,cancel=false;
     (async()=>{try{const ref=await prepDoc();if(cancel)return;
       unsub=ref.onSnapshot(snap=>{
         if(!snap.exists){setLoadErr("Base de dados não encontrada");return;}
         const d=parseDoc(snap.data());
-        if(okRef.current&&d.rev>revRef.current&&JSON.stringify({purchases:d.purchases,people:d.people,baixas:d.baixas,incOk:d.incOk,corr:d.corr})!==JSON.stringify({purchases:ps0.current,people:ppl0.current,baixas:bx0.current,incOk:inc0.current,corr:cor0.current}))tt("Dados atualizados em outro dispositivo");
+        if(okRef.current&&d.rev>revRef.current&&JSON.stringify({purchases:d.purchases,people:d.people,baixas:d.baixas,incOk:d.incOk,corr:d.corr,ajustes:d.ajustes})!==JSON.stringify({purchases:ps0.current,people:ppl0.current,baixas:bx0.current,incOk:inc0.current,corr:cor0.current,ajustes:aj0.current}))tt("Dados atualizados em outro dispositivo");
         applyRemote(d);
       },e=>setLoadErr(String(e?.code||e?.message||e)));
     }catch(e){setLoadErr(String(e?.code||e?.message||e));}})();
     return()=>{cancel=true;if(unsub)unsub();};
   },[user,role]);
-  const okRef=useRef(false);okRef.current=ok;const ps0=useRef(ps);ps0.current=ps;const ppl0=useRef(ppl);ppl0.current=ppl;const bx0=useRef(baixas);bx0.current=baixas;const inc0=useRef(incOk);inc0.current=incOk;const cor0=useRef(corr);cor0.current=corr;
+  const okRef=useRef(false);okRef.current=ok;const ps0=useRef(ps);ps0.current=ps;const ppl0=useRef(ppl);ppl0.current=ppl;const bx0=useRef(baixas);bx0.current=baixas;const inc0=useRef(incOk);inc0.current=incOk;const cor0=useRef(corr);cor0.current=corr;const aj0=useRef(ajustes);aj0.current=ajustes;
 
   // Gravação automática (só admin): só quando algo mudou de fato, com histórico
-  useEffect(()=>{if(!ok||!canEdit)return;const snap=JSON.stringify({purchases:ps,people:ppl,baixas,incOk,corr});if(snap===svRef.current)return;if(tr.current)clearTimeout(tr.current);
-    tr.current=setTimeout(async()=>{tr.current=null;const next={purchases:ps,people:ppl,baixas,incOk,corr};const changes=diffData(baseRef.current,next);const ops=opsData(baseRef.current,next);setSaving(true);
+  useEffect(()=>{if(!ok||!canEdit)return;const snap=JSON.stringify({purchases:ps,people:ppl,baixas,incOk,corr,ajustes});if(snap===svRef.current)return;if(tr.current)clearTimeout(tr.current);
+    tr.current=setTimeout(async()=>{tr.current=null;const next={purchases:ps,people:ppl,baixas,incOk,corr,ajustes};const changes=diffData(baseRef.current,next);const ops=opsData(baseRef.current,next);setSaving(true);
       try{
         if(!initFB()){const now=new Date().toISOString();await svLocal({...next,updatedAt:now});svRef.current=snap;baseRef.current=next;setLastUpdate(now);setHistory(h=>changes.length?[...h,{ts:now,user:user.email,changes}]:h);tt("Salvo localmente");return;}
         const r=await saveTx(next,Math.max(revRef.current,0),changes,user.email);
@@ -757,13 +783,17 @@ function App(){
         if(e?.code==="conflict"){tt("Os dados foram alterados em outro dispositivo. Sua última alteração não foi salva; confira e refaça.",6e3);const s2=await initFB().doc(DOC_PATH).get();revRef.current=-1;applyRemote(parseDoc(s2.data()));}
         else tt("Erro ao salvar: "+(e?.code||e?.message||e),6e3);
       }finally{setSaving(false);}
-    },.8e3);},[ps,ppl,baixas,incOk,corr,ok]);
+    },.8e3);},[ps,ppl,baixas,incOk,corr,ajustes,ok]);
   const tt=(m,ms=2e3)=>{setToast(m);setTimeout(()=>setToast(null),ms);};
+  // aviso de versão nova publicada (o navegador pode manter a página antiga em cache)
+  const[novaVer,setNovaVer]=useState(null);
+  useEffect(()=>{if(APP_VERSION.startsWith("__"))return;const chk=()=>fetch(location.pathname+"?v="+Date.now(),{cache:"no-store"}).then(r=>r.ok?r.text():"").then(t=>{const v=(/APP_VERSION *= *"([^"]+)"/.exec(t)||[])[1];if(v&&v!==APP_VERSION)setNovaVer(v);}).catch(()=>{});
+    chk();const iv=setInterval(chk,5*60e3);const vis=()=>{if(document.visibilityState==="visible")chk();};document.addEventListener("visibilitychange",vis);return()=>{clearInterval(iv);document.removeEventListener("visibilitychange",vis);};},[]);
   const am=useMemo(()=>{const s=new Set([cmk()]);ps.forEach(p=>Object.keys(p.monthly).forEach(m=>s.add(m)));Object.keys(baixas).forEach(m=>{if((baixas[m]||[]).length)s.add(m);});return MO.filter(m=>s.has(m));},[ps,baixas]);
-  const mt=useMemo(()=>{const t={};am.forEach(m=>{t[m]=0;});ps.forEach(p=>Object.entries(p.monthly).forEach(([m,v])=>{t[m]=(t[m]||0)+v;}));return t;},[ps,am]);
+  const mt=useMemo(()=>{const t={};am.forEach(m=>{t[m]=0;});ps.forEach(p=>Object.entries(p.monthly).forEach(([m,v])=>{t[m]=(t[m]||0)+v;}));Object.entries(ajustes).forEach(([m,l])=>(l||[]).forEach(x=>{t[m]=(t[m]||0)+x.valor;}));return t;},[ps,am,ajustes]);
   const cmp=useMemo(()=>ps.filter(p=>p.monthly[sm]>0),[ps,sm]);
   const ap=useMemo(()=>ps.filter(p=>{const k=Object.keys(p.monthly);if(!k.length)return true;return MO.indexOf(k[k.length-1])>=MO.indexOf(cmk());}),[ps]);
-  const td=useMemo(()=>{let prov=0;let bx=0;const ci=MO.indexOf(cmk());ps.forEach(p=>Object.entries(p.monthly).forEach(([m,v])=>{if(MO.indexOf(m)>=ci)prov+=v;}));MO.forEach((m,i)=>{if(i>=ci)(baixas[m]||[]).forEach(b=>{bx+=b.amount;});});return prov-bx;},[ps,baixas]);
+  const td=useMemo(()=>{let prov=0;let bx=0;const ci=MO.indexOf(cmk());ps.forEach(p=>Object.entries(p.monthly).forEach(([m,v])=>{if(MO.indexOf(m)>=ci)prov+=v;}));Object.entries(ajustes).forEach(([m,l])=>{if(MO.indexOf(m)>=ci)(l||[]).forEach(x=>{prov+=x.valor;});});MO.forEach((m,i)=>{if(i>=ci)(baixas[m]||[]).forEach(b=>{bx+=b.amount;});});return prov-bx;},[ps,baixas,ajustes]);
 
   const handleLogin=async()=>{setAuthError(null);setAuthLoading(true);const u=await loginGoogle();if(!u)setAuthLoading(false);};
   const handleLogout=async()=>{await logout();setOk(false);setPs([]);setPpl({});setBaixas({});};
@@ -846,19 +876,20 @@ function App(){
       {[["dashboard","Dashboard"],["purchases","Compras"],["baixas","Baixas"],/*["people","Terceiros"],*/["reports","Gráficos"],["relatorios","Relatórios"],...(P.inconsistencias?[["incons","Inconsistências"]]:[]),["history","Histórico"],...(P.usuarios?[["usuarios","Usuários"]]:[]),...(isAdmin?[["correcoes",corrPend?`Correções (${corrPend})`:"Correções"]]:[])].map(([id,lb])=>(<button key={id} onClick={()=>setTab(id)} style={{background:tab===id?Z.cd2:"transparent",color:tab===id?Z.ac:Z.tx2,border:"none",borderBottom:tab===id?`2px solid ${Z.ac2}`:"2px solid transparent",padding:"10px 13px",fontSize:11,fontWeight:500,cursor:"pointer"}}>{lb}</button>))}
     </nav>
 
+    {novaVer&&<div style={{display:"flex",gap:10,alignItems:"center",justifyContent:"center",flexWrap:"wrap",padding:"8px 18px",background:`${Z.yl}18`,borderBottom:`1px solid ${Z.yl}50`,fontSize:12,color:Z.tx}}><span>Há uma versão nova do app ({novaVer}).</span><button onClick={()=>location.reload()} style={{background:Z.yl,color:"#111",border:"none",borderRadius:6,padding:"5px 12px",fontSize:12,fontWeight:700,cursor:"pointer"}}>Atualizar agora</button></div>}
     <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",padding:"6px 18px",background:Z.bg,borderBottom:`1px solid ${Z.bd}`,fontSize:10,color:Z.tx3,flexWrap:"wrap",gap:4}}>
       <span>Fechamento da fatura: <span style={{color:Z.yl,fontWeight:600}}>dia 19 de cada mês</span> <span style={{marginLeft:6,opacity:.7}}>· versão {APP_VERSION}</span></span>
       <span>Última atualização: <span style={{color:Z.ac,fontFamily:Z.mn}}>{lastUpdate?new Date(lastUpdate).toLocaleString("pt-BR",{day:"2-digit",month:"2-digit",year:"numeric",hour:"2-digit",minute:"2-digit"}):"—"}</span></span>
     </div>
 
     <main style={{padding:18,maxWidth:1100,margin:"0 auto",animation:"fi .25s ease"}}>
-      {tab==="dashboard"&&<Dash {...{mt,sm,setSm,cmp,td,ap,am,ps,baixas,setBaixas}} isAdmin={canEdit}/>}
+      {tab==="dashboard"&&<Dash {...{mt,sm,setSm,cmp,td,ap,am,ps,baixas,setBaixas,ajustes,setAjustes,setIncOk}} isAdmin={canEdit} canAj={!!P.inconsistencias}/>}
       {tab==="purchases"&&<Purch {...{ps,setPs,sr,setSr,setEp}} isAdmin={canEdit}/>}
       {tab==="baixas"&&<BaixasView {...{baixas,setBaixas,mt,am}} isAdmin={canEdit}/>}
       {/*tab==="people"&&<Ppl ppl={ppl} setPpl={setPpl} isAdmin={isAdmin}/>*/}
       {tab==="reports"&&<Rpts {...{ps,mt,am}}/>}
-      {tab==="relatorios"&&<Relat {...{ps,baixas,mt,am,incOk}} isAdmin={!!P.inconsistencias}/>}
-      {tab==="incons"&&P.inconsistencias&&<Incons {...{ps,baixas,incOk,setIncOk,user}}/>}
+      {tab==="relatorios"&&<Relat {...{ps,baixas,mt,am,incOk,ajustes}} isAdmin={!!P.inconsistencias}/>}
+      {tab==="incons"&&P.inconsistencias&&<Incons {...{ps,baixas,incOk,setIncOk,user,ajustes,setAjustes,am}}/>}
       {tab==="history"&&<Hist history={history}/>}
       {tab==="usuarios"&&P.usuarios&&<Usuarios user={user}/>}
       {tab==="correcoes"&&isAdmin&&<Correcoes list={corrList} {...{ps,baixas,setPs,setBaixas,corr,setCorr,user,tt}}/>}
@@ -872,7 +903,7 @@ function App(){
 
 function St({label,value,sub,color=Z.ac}){return(<div style={{background:Z.cd,border:`1px solid ${Z.bd}`,borderRadius:10,padding:"14px 16px",flex:"1 1 170px",minWidth:150}}><div style={{fontSize:9,color:Z.tx3,fontWeight:500,textTransform:"uppercase",letterSpacing:".07em"}}>{label}</div><div style={{fontSize:18,fontWeight:700,color,marginTop:5,fontFamily:Z.mn}}>{value}</div>{sub&&<div style={{fontSize:9,color:Z.tx3,marginTop:2}}>{sub}</div>}</div>);}
 
-function Dash({mt,sm,setSm,cmp,td,ap,am,ps,baixas,setBaixas,isAdmin}){
+function Dash({mt,sm,setSm,cmp,td,ap,am,ps,baixas,setBaixas,isAdmin,ajustes,setAjustes,setIncOk,canAj}){
   const[selLoja,setSelLoja]=useState(null);
   const[showAddBx,setShowAddBx]=useState(false);const[showPrint,setShowPrint]=useState(false);
   const[bxAmt,setBxAmt]=useState("");
@@ -921,7 +952,7 @@ function Dash({mt,sm,setSm,cmp,td,ap,am,ps,baixas,setBaixas,isAdmin}){
 
   return(<div>
     <div style={{display:"flex",alignItems:"center",gap:8,marginBottom:18}}><select value={sm} onChange={e=>{setSm(e.target.value);setSelLoja(null);setShowAddBx(false);}} style={{background:Z.cd,color:Z.tx,border:`1px solid ${Z.bd}`,borderRadius:6,padding:"6px 9px",fontSize:12,fontWeight:500,cursor:"pointer",fontFamily:Z.ft}}>{[...am].reverse().map(m=><option key={m} value={m}>{m}</option>)}</select><button onClick={()=>setShowPrint(true)} style={{background:Z.cd,color:Z.tx2,border:`1px solid ${Z.bd}`,borderRadius:6,padding:"6px 12px",fontSize:11,cursor:"pointer",fontFamily:Z.ft}}>🖨 Imprimir</button></div>
-    {showPrint&&<PrintMonth {...{sm,ps,baixas,mt}} onClose={()=>setShowPrint(false)}/>}
+    {showPrint&&<PrintMonth {...{sm,ps,baixas,mt,ajustes}} onClose={()=>setShowPrint(false)}/>}
     <div className="stat-row" style={{display:"flex",gap:10,flexWrap:"wrap",marginBottom:18}}>
       <St label="Fatura do Mês" value={fB(c)} sub={df!==0?`${df>0?"▲":"▼"} ${Math.abs(df).toFixed(1)}%`:null} color={Z.ac}/>
       <St label="Baixas do Mês" value={fB(totalBaixas)} sub={`${mBaixas.length} pagamento${mBaixas.length!==1?"s":""}`} color={Z.gn}/>
@@ -1007,7 +1038,7 @@ function Dash({mt,sm,setSm,cmp,td,ap,am,ps,baixas,setBaixas,isAdmin}){
           </div>
         </>):(<>
           <div style={{fontSize:11,fontWeight:600,color:Z.ac,marginBottom:12}}>Parcelas do Mês</div>
-          <div>{[...cmp].sort((a,b)=>dKey(b)-dKey(a)).map(p=>(<div key={p.id} style={{display:"grid",gridTemplateColumns:"1fr auto auto",alignItems:"center",gap:10,padding:"5px 0",borderBottom:`1px solid ${Z.bd}`,fontSize:11}}><div style={{minWidth:0,overflow:"hidden",textOverflow:"ellipsis",whiteSpace:"nowrap"}}><span>{p.loja}</span><span style={{color:Z.tx3,marginLeft:5,fontSize:9}}>{p.parcelas}x</span></div><span style={{fontFamily:Z.mn,fontSize:10,color:Z.tx2}}>{fD(p.data)}</span><span style={{fontFamily:Z.mn,color:Z.ac,textAlign:"right"}}>{fB(p.monthly[sm])}</span></div>))}</div>
+          <div>{[...cmp].sort((a,b)=>dKey(b)-dKey(a)).map(p=>(<div key={p.id} style={{display:"grid",gridTemplateColumns:"1fr auto auto",alignItems:"center",gap:10,padding:"5px 0",borderBottom:`1px solid ${Z.bd}`,fontSize:11}}><div style={{minWidth:0,overflow:"hidden",textOverflow:"ellipsis",whiteSpace:"nowrap"}}><span>{p.loja}</span><span style={{color:Z.tx3,marginLeft:5,fontSize:9}}>{p.parcelas}x</span></div><span style={{fontFamily:Z.mn,fontSize:10,color:Z.tx2}}>{fD(p.data)}</span><span style={{fontFamily:Z.mn,color:Z.ac,textAlign:"right"}}>{fB(p.monthly[sm])}</span></div>))}{(ajustes[sm]||[]).map(x=>(<div key={x.key} style={{display:"grid",gridTemplateColumns:"1fr auto auto",alignItems:"center",gap:10,padding:"5px 0",borderBottom:`1px solid ${Z.bd}`,fontSize:11}}><div style={{minWidth:0}}><span style={{fontSize:9,fontWeight:700,padding:"1px 5px",borderRadius:4,background:`${Z.yl}25`,color:Z.yl,marginRight:5}}>Ajuste</span><span style={{color:Z.tx2}}>{x.desc}</span></div>{canAj?<button title="Remover ajuste" onClick={()=>{if(!confirm("Remover este ajuste? A inconsistência volta a ficar pendente."))return;setAjustes(a=>({...a,[sm]:(a[sm]||[]).filter(y=>y.key!==x.key)}));setIncOk(o=>{const n={...o};delete n[x.key];return n;});}} style={{background:"none",border:"none",color:Z.rd,cursor:"pointer",fontSize:11}}>✕</button>:<span/>}<span style={{fontFamily:Z.mn,textAlign:"right",fontWeight:600,color:x.valor>=0?Z.rd:Z.gn}}>{x.valor>=0?"+":"−"} {fB(Math.abs(x.valor))}</span></div>))}</div>
         </>)}
       </div>
     </div>
