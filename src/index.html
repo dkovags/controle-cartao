@@ -458,7 +458,7 @@ function IncSheet({items,ps,baixas}){
   </ReportDoc>);
 }
 // Aba Relatórios
-function Relat({ps,baixas,mt,am,incOk,isAdmin,ajustes}){
+function Relat({ps,baixas,mt,am,incOk,isAdmin,ajustes,admin,history}){
   const months=[...am].reverse();
   const[m,setM]=useState(am.includes(cmk())?cmk():months[0]);const[tipo,setTipo]=useState("ambos");const[open,setOpen]=useState(null);const[comInc,setComInc]=useState(false);
   // erros pendentes com valor (cada compra/mês uma vez)
@@ -477,6 +477,7 @@ function Relat({ps,baixas,mt,am,incOk,isAdmin,ajustes}){
       {isAdmin&&<label style={{display:"flex",alignItems:"center",gap:8,fontSize:12,color:Z.tx,cursor:"pointer",marginBottom:14}}><input type="checkbox" checked={comInc} onChange={e=>setComInc(e.target.checked)} style={{width:16,height:16,accentColor:Z.ac2}}/>Incluir os valores das inconsistências do tipo erro</label>}
       <button onClick={()=>setOpen("mes")} style={btn}>Visualizar e imprimir</button>
     </div>
+    {admin&&<RelAlt history={history||[]} card={card} sel={sel} btn={btn}/>}
     {open==="mes"&&<PrintShell docName={pdfName(monthTitle(tipo!=="bx",tipo!=="lanc"),m)} onClose={()=>setOpen(null)}><MonthSheet sm={m} {...{ps,baixas,mt,ajustes}} showL={tipo!=="bx"} showB={tipo!=="lanc"} incErr={isAdmin&&comInc?incErr:null}/></PrintShell>}
   </div>);
 }
@@ -710,6 +711,8 @@ function Correcoes({list,ps,baixas,setPs,setBaixas,corr,setCorr,user,tt}){
 
 // ─── HISTÓRICO ───
 const HistCtx=React.createContext([]);
+// data local (aaaa-mm-dd) para filtrar por dia no fuso do aparelho
+const dLoc=t=>{const d=new Date(t);return`${d.getFullYear()}-${String(d.getMonth()+1).padStart(2,"0")}-${String(d.getDate()).padStart(2,"0")}`;};
 const fmtTs=t=>new Date(t).toLocaleString("pt-BR",{day:"2-digit",month:"2-digit",year:"numeric",hour:"2-digit",minute:"2-digit"});
 const H_TIPOS=[["compra","Compras"],["baixa","Baixas"],["ajuste","Ajustes"],["incons","Inconsistências"],["usuario","Usuários e perfis"],["correcao","Correções"],["outro","Outros"]];
 function hTipo(t){return /compra/i.test(t)&&!/^Inconsist|^Ajuste/.test(t)?"compra":/baixa/i.test(t)&&!/^Inconsist|^Ajuste/.test(t)?"baixa":/^Ajuste/.test(t)?"ajuste":/^Inconsist/.test(t)?"incons":/^(Usuário|Perfil)/.test(t)?"usuario":/^Correç/.test(t)?"correcao":/ loja .* → /.test(t)?"compra":"outro";}
@@ -732,10 +735,10 @@ function baixarCSV(linhas,nome){
   const csv="﻿"+[["Data e hora","Usuário","Tipo","Ação","Alteração"].map(q).join(";"),...linhas.map(l=>[fmtTs(l.ts),l.user,tn[l.tipo],l.acao,l.txt].map(q).join(";"))].join("\r\n");
   const u=URL.createObjectURL(new Blob([csv],{type:"text/csv;charset=utf-8"}));const a=document.createElement("a");a.href=u;a.download=nome;document.body.appendChild(a);a.click();a.remove();setTimeout(()=>URL.revokeObjectURL(u),2e3);
 }
-function Hist({history,canExport}){
+function Hist({history,canExport,canPrint}){
   const[n,setN]=useState(100);const[tipo,setTipo]=useState("");const[usr,setUsr]=useState("");const[de,setDe]=useState("");const[ate,setAte]=useState("");const[q,setQ]=useState("");const[pr,setPr]=useState(false);
   const todas=useMemo(()=>hLinhas(history),[history]);const users=[...new Set(todas.map(l=>l.user))].sort();
-  const lista=todas.filter(l=>(!tipo||l.tipo===tipo)&&(!usr||l.user===usr)&&(!de||l.ts.slice(0,10)>=de)&&(!ate||l.ts.slice(0,10)<=ate)&&(!q||l.txt.toLowerCase().includes(q.toLowerCase())));
+  const lista=todas.filter(l=>(!tipo||l.tipo===tipo)&&(!usr||l.user===usr)&&(!de||dLoc(l.ts)>=de)&&(!ate||dLoc(l.ts)<=ate)&&(!q||l.txt.toLowerCase().includes(q.toLowerCase())));
   const sel={background:Z.cd2,color:Z.tx,border:`1px solid ${Z.bd}`,borderRadius:6,padding:"6px 8px",fontSize:11,fontFamily:Z.ft,minWidth:0};
   const btn={background:Z.cd2,color:Z.tx2,border:`1px solid ${Z.bd}`,borderRadius:6,padding:"6px 12px",fontSize:11,cursor:"pointer",fontFamily:Z.ft};
   const filtros=[tipo&&Object.fromEntries(H_TIPOS)[tipo],usr,de&&`de ${de.split("-").reverse().join("/")}`,ate&&`até ${ate.split("-").reverse().join("/")}`,q&&`“${q}”`].filter(Boolean).join(" · ");
@@ -753,7 +756,7 @@ function Hist({history,canExport}){
     <div style={{display:"flex",gap:6,alignItems:"center",flexWrap:"wrap",marginBottom:6}}>
       <span style={{fontSize:10,color:Z.tx2,marginRight:"auto"}}>{lista.length} alteraç{lista.length===1?"ão":"ões"}{filtros?` · ${filtros}`:""}</span>
       {(tipo||usr||de||ate||q)&&<button onClick={()=>{setTipo("");setUsr("");setDe("");setAte("");setQ("");}} style={btn}>Limpar filtros</button>}
-      <button disabled={!lista.length} onClick={()=>setPr(true)} style={btn}>Imprimir / PDF</button>
+      {canPrint&&<button disabled={!lista.length} onClick={()=>setPr(true)} style={btn}>Imprimir / PDF</button>}
       {canExport&&<button disabled={!lista.length} onClick={()=>baixarCSV(lista,`CPC - Historico de alteracoes ${new Date().toISOString().slice(0,10)}.csv`)} style={btn}>CSV</button>}
     </div>
     {!lista.length&&<div style={{color:Z.tx3,fontSize:11,padding:"10px 0"}}>{todas.length?"Nenhuma alteração com esses filtros.":"Nenhuma alteração registrada ainda."}</div>}
@@ -763,6 +766,40 @@ function Hist({history,canExport}){
       <div style={{fontFamily:"Arial",color:"#111"}}><div style={{fontSize:15,fontWeight:700}}>CPC – Histórico de alterações</div>
         <div style={{fontSize:10,color:"#555",margin:"2px 0 10px"}}>{filtros||"Sem filtros"} · {lista.length} alteraç{lista.length===1?"ão":"ões"} · emitido em {fmtTs(new Date().toISOString())}</div>
         <HistTabela linhas={lista} print/></div></PrintShell>}
+  </div>);
+}
+// Relatório de alterações (só administrador): período, tipo e usuário; resumo e lista detalhada
+function RelAlt({history,card,sel,btn}){
+  const iso=d=>dLoc(d);const hoje=new Date();const br=x=>x.split("-").reverse().join("/");
+  const pres=[["mes","Este mês",()=>[iso(new Date(hoje.getFullYear(),hoje.getMonth(),1)),iso(hoje)]],["ant","Mês anterior",()=>[iso(new Date(hoje.getFullYear(),hoje.getMonth()-1,1)),iso(new Date(hoje.getFullYear(),hoje.getMonth(),0))]],["7","Últimos 7 dias",()=>[iso(new Date(hoje-6*864e5)),iso(hoje)]],["tudo","Tudo",()=>["",""]]];
+  const[de,setDe]=useState(pres[0][2]()[0]);const[ate,setAte]=useState(pres[0][2]()[1]);const[tipo,setTipo]=useState("");const[usr,setUsr]=useState("");const[open,setOpen]=useState(false);
+  const todas=useMemo(()=>hLinhas(history),[history]);const users=[...new Set(todas.map(l=>l.user))].sort();
+  const lista=todas.filter(l=>(!tipo||l.tipo===tipo)&&(!usr||l.user===usr)&&(!de||dLoc(l.ts)>=de)&&(!ate||dLoc(l.ts)<=ate));
+  const tn=Object.fromEntries(H_TIPOS);const ACS=["Inclusão","Alteração","Exclusão"];
+  const per=de||ate?`${de?br(de):"início"} a ${ate?br(ate):"hoje"}`:"todo o período";
+  const cont=(k)=>{const o={};lista.forEach(l=>{const g=l[k];o[g]=o[g]||{Inclusão:0,Alteração:0,Exclusão:0,total:0};o[g][l.acao]++;o[g].total++;});return Object.entries(o).sort((a,b)=>b[1].total-a[1].total);};
+  const td={padding:"4px 6px",borderBottom:"1px solid #ddd",fontSize:10},th={...td,borderBottom:"2px solid #333",textAlign:"left"},nr={...td,textAlign:"right"};
+  const Resumo=({k,rot,nome})=>(<table style={{width:"100%",borderCollapse:"collapse",marginBottom:12}}><thead><tr><th style={th}>{rot}</th>{ACS.map(a=><th key={a} style={{...th,textAlign:"right"}}>{a}</th>)}<th style={{...th,textAlign:"right"}}>Total</th></tr></thead>
+    <tbody>{cont(k).map(([g,c])=>(<tr key={g}><td style={td}>{nome?nome(g):g}</td>{ACS.map(a=><td key={a} style={nr}>{c[a]||"–"}</td>)}<td style={{...nr,fontWeight:700}}>{c.total}</td></tr>))}</tbody></table>);
+  return(<div style={card}>
+    <div style={{fontSize:12,fontWeight:600,color:Z.ac,marginBottom:4}}>Relatório de alterações <span style={{fontSize:9,color:Z.tx3,fontWeight:400}}>(só administrador)</span></div>
+    <div style={{fontSize:10,color:Z.tx3,marginBottom:12}}>Quem incluiu, alterou ou excluiu o quê no período, com resumo por usuário e por tipo. Registro desde 15/10/2026.</div>
+    <div style={{display:"flex",gap:6,flexWrap:"wrap",marginBottom:10}}>{pres.map(([k,l,f])=>{const[a,b]=f();const on=a===de&&b===ate;return(<button key={k} onClick={()=>{setDe(a);setAte(b);}} style={{background:on?`${Z.ac3}30`:Z.cd2,color:on?Z.ac:Z.tx2,border:`1px solid ${Z.bd}`,borderRadius:6,padding:"5px 10px",fontSize:11,cursor:"pointer",fontFamily:Z.ft}}>{l}</button>);})}</div>
+    <div style={{display:"grid",gridTemplateColumns:"repeat(auto-fit,minmax(130px,1fr))",gap:8,marginBottom:14}}>
+      <label style={{fontSize:10,color:Z.tx2,display:"flex",flexDirection:"column",gap:3}}>De<input type="date" value={de} onChange={e=>setDe(e.target.value)} style={sel}/></label>
+      <label style={{fontSize:10,color:Z.tx2,display:"flex",flexDirection:"column",gap:3}}>Até<input type="date" value={ate} onChange={e=>setAte(e.target.value)} style={sel}/></label>
+      <label style={{fontSize:10,color:Z.tx2,display:"flex",flexDirection:"column",gap:3}}>Tipo<select value={tipo} onChange={e=>setTipo(e.target.value)} style={sel}><option value="">Todos</option>{H_TIPOS.map(([v,l])=><option key={v} value={v}>{l}</option>)}</select></label>
+      <label style={{fontSize:10,color:Z.tx2,display:"flex",flexDirection:"column",gap:3}}>Usuário<select value={usr} onChange={e=>setUsr(e.target.value)} style={sel}><option value="">Todos</option>{users.map(u=><option key={u} value={u}>{u}</option>)}</select></label>
+    </div>
+    <div style={{display:"flex",gap:10,alignItems:"center",flexWrap:"wrap"}}><button disabled={!lista.length} onClick={()=>setOpen(true)} style={{...btn,opacity:lista.length?1:.5}}>Visualizar e imprimir</button><span style={{fontSize:11,color:Z.tx2}}>{lista.length} alteraç{lista.length===1?"ão":"ões"} · {per}</span></div>
+    {open&&<PrintShell docName={`CPC - Relatório de alterações - ${per.replace(/\//g,"-")}`} onClose={()=>setOpen(false)}>
+      <div style={{fontFamily:"Arial",color:"#111"}}>
+        <div style={{fontSize:16,fontWeight:700}}>CPC – Relatório de alterações</div>
+        <div style={{fontSize:11,margin:"2px 0 12px",color:"#333"}}>Período: <b>{per}</b>{tipo?` · Tipo: ${tn[tipo]}`:""}{usr?` · Usuário: ${usr}`:""} · {lista.length} alteraç{lista.length===1?"ão":"ões"} · emitido em {fmtTs(new Date().toISOString())}</div>
+        <div style={{fontSize:12,fontWeight:700,margin:"6px 0 4px"}}>Resumo por usuário</div><Resumo k="user" rot="Usuário"/>
+        <div style={{fontSize:12,fontWeight:700,margin:"6px 0 4px"}}>Resumo por tipo</div><Resumo k="tipo" rot="Tipo" nome={g=>tn[g]}/>
+        <div style={{fontSize:12,fontWeight:700,margin:"10px 0 4px"}}>Alterações (da mais recente para a mais antiga)</div><HistTabela linhas={lista} print/>
+      </div></PrintShell>}
   </div>);
 }
 // botão 🕘 de um registro (compra ou baixa): abre só as alterações dele
@@ -950,9 +987,9 @@ function App(){
       {tab==="baixas"&&<BaixasView {...{baixas,setBaixas,mt,am}} isAdmin={canEdit}/>}
       {/*tab==="people"&&<Ppl ppl={ppl} setPpl={setPpl} isAdmin={isAdmin}/>*/}
       {tab==="reports"&&<Rpts {...{ps,mt,am}}/>}
-      {tab==="relatorios"&&<Relat {...{ps,baixas,mt,am,incOk,ajustes}} isAdmin={!!P.inconsistencias}/>}
+      {tab==="relatorios"&&<Relat {...{ps,baixas,mt,am,incOk,ajustes,history}} isAdmin={!!P.inconsistencias} admin={isAdmin}/>}
       {tab==="incons"&&P.inconsistencias&&<Incons {...{ps,baixas,incOk,setIncOk,user,ajustes,setAjustes,am}}/>}
-      {tab==="history"&&<Hist history={history} canExport={!!P.exportar}/>}
+      {tab==="history"&&<Hist history={history} canExport={!!P.exportar} canPrint={isAdmin}/>}
       {tab==="usuarios"&&P.usuarios&&<Usuarios user={user}/>}
       {tab==="correcoes"&&isAdmin&&<Correcoes list={corrList} {...{ps,baixas,setPs,setBaixas,corr,setCorr,user,tt}}/>}
     </main></HistCtx.Provider>
