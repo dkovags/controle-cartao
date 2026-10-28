@@ -65,6 +65,7 @@ erDiagram
         string ts "ISO 8601"
         string user "e-mail de quem alterou"
         array changes "descrições em texto"
+        array refs "registro de cada linha (c:id, b:mês|data|valor)"
     }
     TRATAMENTO {
         string by "e-mail de quem marcou"
@@ -153,8 +154,15 @@ Fica na lista do mês da fatura a que o pagamento se refere (`baixas["Outubro/20
 
 ```json
 { "ts": "2026-10-16T13:20:05.112Z", "user": "kelianeserra@gmail.com",
-  "changes": ["Nova baixa em Outubro/2026: R$ 5.750,00 (13/10/2026) com comprovante"] }
+  "changes": ["Nova baixa em Outubro/2026: R$ 5.750,00 (13/10/2026) com comprovante"],
+  "refs": [["b:Outubro/2026|13/10/2026|5750"]] }
 ```
+
+`refs` (desde 28/10/2026) diz a que registro cada linha de `changes` se refere: `c:<id da compra>` ou
+`b:<mês>|<data>|<valor>` para baixa (numa alteração de baixa, o valor novo e o antigo, para seguir a cadeia).
+É o que alimenta o botão 🕘 **Histórico** de cada compra e baixa; linhas antigas, sem `refs`, são
+localizadas pelo texto. A aba **Histórico** lista todas as alterações com filtros (tipo, usuário,
+período, busca), impressão/PDF e CSV.
 
 ### Tratamento de inconsistência (`incOk`)
 
