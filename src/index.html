@@ -25,7 +25,7 @@
 <body>
 <div id="root"></div>
 <script type="text/babel">
-const { useState, useMemo, useEffect, useRef } = React;
+const { useState, useMemo, useEffect, useRef, useContext } = React;
 
 const MS=["Jan","Fev","Mar","Abr","Mai","Jun","Jul","Ago","Set","Out","Nov","Dez"];
 const MM={"Janeiro":0,"Fevereiro":1,"Março":2,"Abril":3,"Maio":4,"Junho":5,"Julho":6,"Agosto":7,"Setembro":8,"Outubro":9,"Novembro":10,"Dezembro":11};
@@ -112,7 +112,7 @@ async function saveTx(next,baseRev,changes,who){
     const s=await t.get(ref);const cur=s.exists?(s.data().rev||0):0;
     if(cur!==baseRev){const e=new Error("conflict");e.code="conflict";throw e;}
     const hist=s.exists?(pJ(s.data().history)||[]):[];const now=new Date().toISOString();
-    if(changes.length)hist.push({ts:now,user:who,changes});
+    if(changes.length)hist.push({ts:now,user:who,changes:[...changes],...(changes.refs?.some(Boolean)?{refs:changes.refs}:{})});
     while(hist.length>500)hist.shift();
     t.set(ref,{purchases:JSON.stringify(next.purchases),people:JSON.stringify(next.people),baixas:JSON.stringify(next.baixas),incOk:JSON.stringify(next.incOk||{}),corr:JSON.stringify(next.corr||{}),ajustes:JSON.stringify(next.ajustes||{}),updatedAt:now,rev:cur+1,history:JSON.stringify(hist)});
     return{rev:cur+1,now,hist};
@@ -127,10 +127,12 @@ async function svLocal(d){try{await window.storage.set("cc-despesas-v10",JSON.st
 
 // Descreve em português o que mudou entre duas versões dos dados (para o histórico)
 function diffData(a,b){
-  const out=[];const pd=p=>`${p.loja} (${fD(p.data)})`;
+  // refs: a que registro cada linha se refere (c:<id da compra>, b:<mês>|<data>|<valor>), para o histórico por transação
+  const out=[];const refs=[];out.refs=refs;const add=(t,r)=>{out.push(t);refs.push(r||null);};const pd=p=>`${p.loja} (${fD(p.data)})`;
+  const bref=(m,x)=>`b:${m}|${x.date}|${x.amount}`;
   const A=new Map(a.purchases.map(p=>[p.id,p])),B=new Map(b.purchases.map(p=>[p.id,p]));
-  B.forEach((p,id)=>{if(!A.has(id))out.push(`Nova compra: ${pd(p)} – ${fB(p.total)} em ${p.parcelas}x${p.anexos?.length?" (com comprovante)":""}`);});
-  A.forEach((p,id)=>{if(!B.has(id))out.push(`Compra excluída: ${pd(p)} – ${fB(p.total)} em ${p.parcelas}x`);});
+  B.forEach((p,id)=>{if(!A.has(id))add(`Nova compra: ${pd(p)} – ${fB(p.total)} em ${p.parcelas}x${p.anexos?.length?" (com comprovante)":""}`,["c:"+id]);});
+  A.forEach((p,id)=>{if(!B.has(id))add(`Compra excluída: ${pd(p)} – ${fB(p.total)} em ${p.parcelas}x`,["c:"+id]);});
   B.forEach((p,id)=>{const o=A.get(id);if(!o||JSON.stringify(o)===JSON.stringify(p))return;const f=[];
     if(o.loja!==p.loja)f.push(`loja ${o.loja} → ${p.loja}`);
     if(o.data!==p.data)f.push(`data ${fD(o.data)} → ${fD(p.data)}`);
@@ -138,21 +140,21 @@ function diffData(a,b){
     if(o.parcelas!==p.parcelas)f.push(`parcelas ${o.parcelas} → ${p.parcelas}`);
     if(JSON.stringify(o.monthly)!==JSON.stringify(p.monthly))f.push(`meses: ${Object.keys(o.monthly).length} → ${Object.keys(p.monthly).length}`);
     if((p.anexos||[]).length>(o.anexos||[]).length)f.push("comprovante anexado");
-    out.push(`Compra alterada: ${pd(o)}${f.length?" – "+f.join("; "):""}`);});
+    add(`Compra alterada: ${pd(o)}${f.length?" – "+f.join("; "):""}`,["c:"+id]);});
   const bk=x=>`${fB(x.amount)} (${fD(x.date)})${x.anexos?.length?" com comprovante":""}`;
   new Set([...Object.keys(a.baixas),...Object.keys(b.baixas)]).forEach(m=>{
     const o=a.baixas[m]||[],n=b.baixas[m]||[];if(JSON.stringify(o)===JSON.stringify(n))return;
-    if(o.length===n.length){n.forEach((x,i)=>{if(JSON.stringify(x)!==JSON.stringify(o[i]))out.push(`Baixa alterada em ${m}: ${bk(o[i])} → ${bk(x)}`);});return;}
+    if(o.length===n.length){n.forEach((x,i)=>{if(JSON.stringify(x)!==JSON.stringify(o[i]))add(`Baixa alterada em ${m}: ${bk(o[i])} → ${bk(x)}`,[bref(m,x),bref(m,o[i])]);});return;}
     const cnt={};o.forEach(x=>{const k=JSON.stringify(x);cnt[k]=(cnt[k]||0)+1;});
-    n.forEach(x=>{const k=JSON.stringify(x);if(cnt[k])cnt[k]--;else out.push(`Nova baixa em ${m}: ${bk(x)}`);});
-    Object.entries(cnt).forEach(([k,c])=>{for(let i=0;i<c;i++)out.push(`Baixa excluída em ${m}: ${bk(JSON.parse(k))}`);});
+    n.forEach(x=>{const k=JSON.stringify(x);if(cnt[k])cnt[k]--;else add(`Nova baixa em ${m}: ${bk(x)}`,[bref(m,x)]);});
+    Object.entries(cnt).forEach(([k,c])=>{for(let i=0;i<c;i++)add(`Baixa excluída em ${m}: ${bk(JSON.parse(k))}`,[bref(m,JSON.parse(k))]);});
   });
   const ia=a.incOk||{},ib=b.incOk||{};
-  Object.keys(ib).forEach(k=>{if(!ia[k])out.push(`Inconsistência marcada como tratada: ${ib[k].label||k}`);});
-  Object.keys(ia).forEach(k=>{if(!ib[k])out.push(`Inconsistência reaberta: ${ia[k].label||k}`);});
-  const ja=a.ajustes||{},jb=b.ajustes||{};new Set([...Object.keys(ja),...Object.keys(jb)]).forEach(m=>{const ka=new Set((ja[m]||[]).map(x=>x.key)),kb=new Set((jb[m]||[]).map(x=>x.key));(jb[m]||[]).forEach(x=>{if(!ka.has(x.key))out.push(`Ajuste lançado em ${m}: ${x.desc} – ${x.valor>=0?"+":"−"} ${fB(Math.abs(x.valor))}`);});(ja[m]||[]).forEach(x=>{if(!kb.has(x.key))out.push(`Ajuste removido de ${m}: ${x.desc} – ${x.valor>=0?"+":"−"} ${fB(Math.abs(x.valor))}`);});});
-  const ca=a.corr||{},cb=b.corr||{};Object.keys(cb).forEach(k=>{if(!ca[k])out.unshift(cb[k].status==="aplicada"?`Correção aplicada: ${cb[k].titulo} (preparada pelo Claude)`:`Correção recusada: ${cb[k].titulo} (preparada pelo Claude)`);});
-  new Set([...Object.keys(a.people),...Object.keys(b.people)]).forEach(n=>{if(JSON.stringify(a.people[n])!==JSON.stringify(b.people[n]))out.push(`Terceiros alterados: ${n}`);});
+  Object.keys(ib).forEach(k=>{if(!ia[k])add(`Inconsistência marcada como tratada: ${ib[k].label||k}`);});
+  Object.keys(ia).forEach(k=>{if(!ib[k])add(`Inconsistência reaberta: ${ia[k].label||k}`);});
+  const ja=a.ajustes||{},jb=b.ajustes||{};new Set([...Object.keys(ja),...Object.keys(jb)]).forEach(m=>{const ka=new Set((ja[m]||[]).map(x=>x.key)),kb=new Set((jb[m]||[]).map(x=>x.key));(jb[m]||[]).forEach(x=>{if(!ka.has(x.key))add(`Ajuste lançado em ${m}: ${x.desc} – ${x.valor>=0?"+":"−"} ${fB(Math.abs(x.valor))}`);});(ja[m]||[]).forEach(x=>{if(!kb.has(x.key))add(`Ajuste removido de ${m}: ${x.desc} – ${x.valor>=0?"+":"−"} ${fB(Math.abs(x.valor))}`);});});
+  const ca=a.corr||{},cb=b.corr||{};Object.keys(cb).forEach(k=>{if(!ca[k])(t=>{out.unshift(t);refs.unshift(null);})(cb[k].status==="aplicada"?`Correção aplicada: ${cb[k].titulo} (preparada pelo Claude)`:`Correção recusada: ${cb[k].titulo} (preparada pelo Claude)`);});
+  new Set([...Object.keys(a.people),...Object.keys(b.people)]).forEach(n=>{if(JSON.stringify(a.people[n])!==JSON.stringify(b.people[n]))add(`Terceiros alterados: ${n}`);});
   return out;
 }
 // Operações (inclusão/alteração/exclusão) com valor, para a notificação por e-mail
@@ -456,7 +458,7 @@ function IncSheet({items,ps,baixas}){
   </ReportDoc>);
 }
 // Aba Relatórios
-function Relat({ps,baixas,mt,am,incOk,isAdmin,ajustes}){
+function Relat({ps,baixas,mt,am,incOk,isAdmin,ajustes,admin,history}){
   const months=[...am].reverse();
   const[m,setM]=useState(am.includes(cmk())?cmk():months[0]);const[tipo,setTipo]=useState("ambos");const[open,setOpen]=useState(null);const[comInc,setComInc]=useState(false);
   // erros pendentes com valor (cada compra/mês uma vez)
@@ -475,6 +477,7 @@ function Relat({ps,baixas,mt,am,incOk,isAdmin,ajustes}){
       {isAdmin&&<label style={{display:"flex",alignItems:"center",gap:8,fontSize:12,color:Z.tx,cursor:"pointer",marginBottom:14}}><input type="checkbox" checked={comInc} onChange={e=>setComInc(e.target.checked)} style={{width:16,height:16,accentColor:Z.ac2}}/>Incluir os valores das inconsistências do tipo erro</label>}
       <button onClick={()=>setOpen("mes")} style={btn}>Visualizar e imprimir</button>
     </div>
+    {admin&&<RelAlt history={history||[]} card={card} sel={sel} btn={btn}/>}
     {open==="mes"&&<PrintShell docName={pdfName(monthTitle(tipo!=="bx",tipo!=="lanc"),m)} onClose={()=>setOpen(null)}><MonthSheet sm={m} {...{ps,baixas,mt,ajustes}} showL={tipo!=="bx"} showB={tipo!=="lanc"} incErr={isAdmin&&comInc?incErr:null}/></PrintShell>}
   </div>);
 }
@@ -706,18 +709,110 @@ function Correcoes({list,ps,baixas,setPs,setBaixas,corr,setCorr,user,tt}){
   </div>);
 }
 
-function Hist({history}){
-  const[n,setN]=useState(50);const list=[...history].reverse();
-  const fmt=t=>new Date(t).toLocaleString("pt-BR",{day:"2-digit",month:"2-digit",year:"numeric",hour:"2-digit",minute:"2-digit"});
+// ─── HISTÓRICO ───
+const HistCtx=React.createContext([]);
+// data local (aaaa-mm-dd) para filtrar por dia no fuso do aparelho
+const dLoc=t=>{const d=new Date(t);return`${d.getFullYear()}-${String(d.getMonth()+1).padStart(2,"0")}-${String(d.getDate()).padStart(2,"0")}`;};
+const fmtTs=t=>new Date(t).toLocaleString("pt-BR",{day:"2-digit",month:"2-digit",year:"numeric",hour:"2-digit",minute:"2-digit"});
+const H_TIPOS=[["compra","Compras"],["baixa","Baixas"],["ajuste","Ajustes"],["incons","Inconsistências"],["usuario","Usuários e perfis"],["correcao","Correções"],["outro","Outros"]];
+function hTipo(t){return /compra/i.test(t)&&!/^Inconsist|^Ajuste/.test(t)?"compra":/baixa/i.test(t)&&!/^Inconsist|^Ajuste/.test(t)?"baixa":/^Ajuste/.test(t)?"ajuste":/^Inconsist/.test(t)?"incons":/^(Usuário|Perfil)/.test(t)?"usuario":/^Correç/.test(t)?"correcao":/ loja .* → /.test(t)?"compra":"outro";}
+function hAcao(t){return /^(Nova|Novo|Ajuste lançado|Usuário incluído|Perfil incluído)/.test(t)?"Inclusão":/(excluíd|removid)/i.test(t)?"Exclusão":"Alteração";}
+// uma linha por alteração, da mais recente para a mais antiga
+const hLinhas=history=>{const out=[];[...history].reverse().forEach(h=>(h.changes||[]).forEach((c,k)=>out.push({ts:h.ts,user:h.user,txt:c,refs:(h.refs||[])[k]||null,tipo:hTipo(c),acao:hAcao(c)})));return out;};
+// histórico de um registro: pelas referências gravadas e, nos lançamentos antigos (sem referência), pelo texto;
+// uma alteração de baixa liga o valor novo ao antigo, então a busca segue a cadeia para trás
+function hDoRegistro(history,keys,textos){const ks=new Set(keys);const out=[];
+  hLinhas(history).forEach(l=>{const hit=l.refs?l.refs.some(r=>ks.has(r)):textos.some(t=>l.txt.includes(t));if(hit){out.push(l);(l.refs||[]).forEach(r=>ks.add(r));}});return out;}
+function HistTabela({linhas,print}){
+  const c=print?{td:{padding:"4px 6px",borderBottom:"1px solid #ddd",fontSize:10,verticalAlign:"top"},th:{padding:"4px 6px",borderBottom:"2px solid #333",fontSize:10,textAlign:"left"}}:{td:{padding:"7px 6px",borderTop:`1px solid ${Z.bd}`,fontSize:11,verticalAlign:"top",color:Z.tx},th:{padding:"4px 6px",fontSize:9,color:Z.tx3,textAlign:"left",fontWeight:500}};
+  const cor=a=>print?"#111":a==="Inclusão"?Z.gn:a==="Exclusão"?Z.rd:Z.yl;
+  return(<table style={{width:"100%",borderCollapse:"collapse"}}><thead><tr><th style={{...c.th,width:"22%"}}>Data e usuário</th><th style={{...c.th,width:"13%"}}>Ação</th><th style={c.th}>O que mudou</th></tr></thead>
+    <tbody>{linhas.map((l,i)=>(<tr key={i}><td style={c.td}><div style={{fontFamily:print?"inherit":Z.mn,color:print?"#111":Z.ac}}>{fmtTs(l.ts)}</div><div style={{fontSize:9,color:print?"#555":Z.tx3,wordBreak:"break-all"}}>{l.user}</div></td>
+      <td style={{...c.td,color:cor(l.acao),fontWeight:600}}>{l.acao}</td><td style={c.td}>{l.txt}</td></tr>))}</tbody></table>);
+}
+function baixarCSV(linhas,nome){
+  const q=v=>`"${String(v??"").replace(/"/g,'""')}"`;const tn=Object.fromEntries(H_TIPOS);
+  const csv="﻿"+[["Data e hora","Usuário","Tipo","Ação","Alteração"].map(q).join(";"),...linhas.map(l=>[fmtTs(l.ts),l.user,tn[l.tipo],l.acao,l.txt].map(q).join(";"))].join("\r\n");
+  const u=URL.createObjectURL(new Blob([csv],{type:"text/csv;charset=utf-8"}));const a=document.createElement("a");a.href=u;a.download=nome;document.body.appendChild(a);a.click();a.remove();setTimeout(()=>URL.revokeObjectURL(u),2e3);
+}
+function Hist({history,canExport,canPrint}){
+  const[n,setN]=useState(100);const[tipo,setTipo]=useState("");const[usr,setUsr]=useState("");const[de,setDe]=useState("");const[ate,setAte]=useState("");const[q,setQ]=useState("");const[pr,setPr]=useState(false);
+  const todas=useMemo(()=>hLinhas(history),[history]);const users=[...new Set(todas.map(l=>l.user))].sort();
+  const lista=todas.filter(l=>(!tipo||l.tipo===tipo)&&(!usr||l.user===usr)&&(!de||dLoc(l.ts)>=de)&&(!ate||dLoc(l.ts)<=ate)&&(!q||l.txt.toLowerCase().includes(q.toLowerCase())));
+  const sel={background:Z.cd2,color:Z.tx,border:`1px solid ${Z.bd}`,borderRadius:6,padding:"6px 8px",fontSize:11,fontFamily:Z.ft,minWidth:0};
+  const btn={background:Z.cd2,color:Z.tx2,border:`1px solid ${Z.bd}`,borderRadius:6,padding:"6px 12px",fontSize:11,cursor:"pointer",fontFamily:Z.ft};
+  const filtros=[tipo&&Object.fromEntries(H_TIPOS)[tipo],usr,de&&`de ${de.split("-").reverse().join("/")}`,ate&&`até ${ate.split("-").reverse().join("/")}`,q&&`“${q}”`].filter(Boolean).join(" · ");
+  const ini=history[0]?.ts;
   return(<div style={{background:Z.cd,border:`1px solid ${Z.bd}`,borderRadius:10,padding:16}}>
-    <div style={{fontSize:12,fontWeight:600,color:Z.ac,marginBottom:14}}>Histórico de alterações</div>
-    {!list.length&&<div style={{color:Z.tx3,fontSize:11}}>Nenhuma alteração registrada ainda.</div>}
-    {list.slice(0,n).map((h,i)=>(<div key={i} style={{padding:"10px 0",borderTop:i?`1px solid ${Z.bd}`:"none"}}>
-      <div style={{display:"flex",justifyContent:"space-between",gap:8,flexWrap:"wrap",marginBottom:4}}><span style={{fontFamily:Z.mn,fontSize:11,color:Z.ac}}>{fmt(h.ts)}</span><span style={{fontSize:10,color:Z.tx3}}>{h.user}</span></div>
-      <ul style={{margin:0,paddingLeft:16,fontSize:11,color:Z.tx,lineHeight:1.6}}>{h.changes.map((c,k)=><li key={k}>{c}</li>)}</ul>
-    </div>))}
-    {list.length>n&&<button onClick={()=>setN(n+50)} style={{marginTop:10,background:Z.cd2,color:Z.tx2,border:`1px solid ${Z.bd}`,borderRadius:6,padding:"6px 12px",fontSize:10,cursor:"pointer"}}>Mostrar mais</button>}
+    <div style={{fontSize:12,fontWeight:600,color:Z.ac,marginBottom:4}}>Histórico de alterações</div>
+    <div style={{fontSize:10,color:Z.tx3,marginBottom:12}}>Todas as inclusões, alterações e exclusões{ini?` desde ${fmtTs(ini)}`:""}, com quem fez. O histórico de cada compra ou baixa também abre no botão 🕘 do próprio registro.</div>
+    <div style={{display:"grid",gridTemplateColumns:"repeat(auto-fit,minmax(130px,1fr))",gap:6,marginBottom:8}}>
+      <select value={tipo} onChange={e=>setTipo(e.target.value)} style={sel}><option value="">Todos os tipos</option>{H_TIPOS.map(([v,l])=><option key={v} value={v}>{l}</option>)}</select>
+      <select value={usr} onChange={e=>setUsr(e.target.value)} style={sel}><option value="">Todos os usuários</option>{users.map(u=><option key={u} value={u}>{u}</option>)}</select>
+      <label style={{fontSize:9,color:Z.tx3,display:"flex",flexDirection:"column",gap:2}}>De<input type="date" value={de} onChange={e=>setDe(e.target.value)} style={sel}/></label>
+      <label style={{fontSize:9,color:Z.tx3,display:"flex",flexDirection:"column",gap:2}}>Até<input type="date" value={ate} onChange={e=>setAte(e.target.value)} style={sel}/></label>
+    </div>
+    <input value={q} onChange={e=>setQ(e.target.value)} placeholder="Buscar (loja, valor, data…)" style={{...sel,width:"100%",boxSizing:"border-box",marginBottom:8}}/>
+    <div style={{display:"flex",gap:6,alignItems:"center",flexWrap:"wrap",marginBottom:6}}>
+      <span style={{fontSize:10,color:Z.tx2,marginRight:"auto"}}>{lista.length} alteraç{lista.length===1?"ão":"ões"}{filtros?` · ${filtros}`:""}</span>
+      {(tipo||usr||de||ate||q)&&<button onClick={()=>{setTipo("");setUsr("");setDe("");setAte("");setQ("");}} style={btn}>Limpar filtros</button>}
+      {canPrint&&<button disabled={!lista.length} onClick={()=>setPr(true)} style={btn}>Imprimir / PDF</button>}
+      {canExport&&<button disabled={!lista.length} onClick={()=>baixarCSV(lista,`CPC - Historico de alteracoes ${new Date().toISOString().slice(0,10)}.csv`)} style={btn}>CSV</button>}
+    </div>
+    {!lista.length&&<div style={{color:Z.tx3,fontSize:11,padding:"10px 0"}}>{todas.length?"Nenhuma alteração com esses filtros.":"Nenhuma alteração registrada ainda."}</div>}
+    {lista.length>0&&<HistTabela linhas={lista.slice(0,n)}/>}
+    {lista.length>n&&<button onClick={()=>setN(n+100)} style={{...btn,marginTop:10}}>Mostrar mais</button>}
+    {pr&&<PrintShell docName={`CPC - Histórico de alterações${filtros?" - "+filtros:""}`} onClose={()=>setPr(false)}>
+      <div style={{fontFamily:"Arial",color:"#111"}}><div style={{fontSize:15,fontWeight:700}}>CPC – Histórico de alterações</div>
+        <div style={{fontSize:10,color:"#555",margin:"2px 0 10px"}}>{filtros||"Sem filtros"} · {lista.length} alteraç{lista.length===1?"ão":"ões"} · emitido em {fmtTs(new Date().toISOString())}</div>
+        <HistTabela linhas={lista} print/></div></PrintShell>}
   </div>);
+}
+// Relatório de alterações (só administrador): período, tipo e usuário; resumo e lista detalhada
+function RelAlt({history,card,sel,btn}){
+  const iso=d=>dLoc(d);const hoje=new Date();const br=x=>x.split("-").reverse().join("/");
+  const pres=[["mes","Este mês",()=>[iso(new Date(hoje.getFullYear(),hoje.getMonth(),1)),iso(hoje)]],["ant","Mês anterior",()=>[iso(new Date(hoje.getFullYear(),hoje.getMonth()-1,1)),iso(new Date(hoje.getFullYear(),hoje.getMonth(),0))]],["7","Últimos 7 dias",()=>[iso(new Date(hoje-6*864e5)),iso(hoje)]],["tudo","Tudo",()=>["",""]]];
+  const[de,setDe]=useState(pres[0][2]()[0]);const[ate,setAte]=useState(pres[0][2]()[1]);const[tipo,setTipo]=useState("");const[usr,setUsr]=useState("");const[open,setOpen]=useState(false);
+  const todas=useMemo(()=>hLinhas(history),[history]);const users=[...new Set(todas.map(l=>l.user))].sort();
+  const lista=todas.filter(l=>(!tipo||l.tipo===tipo)&&(!usr||l.user===usr)&&(!de||dLoc(l.ts)>=de)&&(!ate||dLoc(l.ts)<=ate));
+  const tn=Object.fromEntries(H_TIPOS);const ACS=["Inclusão","Alteração","Exclusão"];
+  const per=de||ate?`${de?br(de):"início"} a ${ate?br(ate):"hoje"}`:"todo o período";
+  const cont=(k)=>{const o={};lista.forEach(l=>{const g=l[k];o[g]=o[g]||{Inclusão:0,Alteração:0,Exclusão:0,total:0};o[g][l.acao]++;o[g].total++;});return Object.entries(o).sort((a,b)=>b[1].total-a[1].total);};
+  const td={padding:"4px 6px",borderBottom:"1px solid #ddd",fontSize:10},th={...td,borderBottom:"2px solid #333",textAlign:"left"},nr={...td,textAlign:"right"};
+  const Resumo=({k,rot,nome})=>(<table style={{width:"100%",borderCollapse:"collapse",marginBottom:12}}><thead><tr><th style={th}>{rot}</th>{ACS.map(a=><th key={a} style={{...th,textAlign:"right"}}>{a}</th>)}<th style={{...th,textAlign:"right"}}>Total</th></tr></thead>
+    <tbody>{cont(k).map(([g,c])=>(<tr key={g}><td style={td}>{nome?nome(g):g}</td>{ACS.map(a=><td key={a} style={nr}>{c[a]||"–"}</td>)}<td style={{...nr,fontWeight:700}}>{c.total}</td></tr>))}</tbody></table>);
+  return(<div style={card}>
+    <div style={{fontSize:12,fontWeight:600,color:Z.ac,marginBottom:4}}>Relatório de alterações <span style={{fontSize:9,color:Z.tx3,fontWeight:400}}>(só administrador)</span></div>
+    <div style={{fontSize:10,color:Z.tx3,marginBottom:12}}>Quem incluiu, alterou ou excluiu o quê no período, com resumo por usuário e por tipo. Registro desde 15/10/2026.</div>
+    <div style={{display:"flex",gap:6,flexWrap:"wrap",marginBottom:10}}>{pres.map(([k,l,f])=>{const[a,b]=f();const on=a===de&&b===ate;return(<button key={k} onClick={()=>{setDe(a);setAte(b);}} style={{background:on?`${Z.ac3}30`:Z.cd2,color:on?Z.ac:Z.tx2,border:`1px solid ${Z.bd}`,borderRadius:6,padding:"5px 10px",fontSize:11,cursor:"pointer",fontFamily:Z.ft}}>{l}</button>);})}</div>
+    <div style={{display:"grid",gridTemplateColumns:"repeat(auto-fit,minmax(130px,1fr))",gap:8,marginBottom:14}}>
+      <label style={{fontSize:10,color:Z.tx2,display:"flex",flexDirection:"column",gap:3}}>De<input type="date" value={de} onChange={e=>setDe(e.target.value)} style={sel}/></label>
+      <label style={{fontSize:10,color:Z.tx2,display:"flex",flexDirection:"column",gap:3}}>Até<input type="date" value={ate} onChange={e=>setAte(e.target.value)} style={sel}/></label>
+      <label style={{fontSize:10,color:Z.tx2,display:"flex",flexDirection:"column",gap:3}}>Tipo<select value={tipo} onChange={e=>setTipo(e.target.value)} style={sel}><option value="">Todos</option>{H_TIPOS.map(([v,l])=><option key={v} value={v}>{l}</option>)}</select></label>
+      <label style={{fontSize:10,color:Z.tx2,display:"flex",flexDirection:"column",gap:3}}>Usuário<select value={usr} onChange={e=>setUsr(e.target.value)} style={sel}><option value="">Todos</option>{users.map(u=><option key={u} value={u}>{u}</option>)}</select></label>
+    </div>
+    <div style={{display:"flex",gap:10,alignItems:"center",flexWrap:"wrap"}}><button disabled={!lista.length} onClick={()=>setOpen(true)} style={{...btn,opacity:lista.length?1:.5}}>Visualizar e imprimir</button><span style={{fontSize:11,color:Z.tx2}}>{lista.length} alteraç{lista.length===1?"ão":"ões"} · {per}</span></div>
+    {open&&<PrintShell docName={`CPC - Relatório de alterações - ${per.replace(/\//g,"-")}`} onClose={()=>setOpen(false)}>
+      <div style={{fontFamily:"Arial",color:"#111"}}>
+        <div style={{fontSize:16,fontWeight:700}}>CPC – Relatório de alterações</div>
+        <div style={{fontSize:11,margin:"2px 0 12px",color:"#333"}}>Período: <b>{per}</b>{tipo?` · Tipo: ${tn[tipo]}`:""}{usr?` · Usuário: ${usr}`:""} · {lista.length} alteraç{lista.length===1?"ão":"ões"} · emitido em {fmtTs(new Date().toISOString())}</div>
+        <div style={{fontSize:12,fontWeight:700,margin:"6px 0 4px"}}>Resumo por usuário</div><Resumo k="user" rot="Usuário"/>
+        <div style={{fontSize:12,fontWeight:700,margin:"6px 0 4px"}}>Resumo por tipo</div><Resumo k="tipo" rot="Tipo" nome={g=>tn[g]}/>
+        <div style={{fontSize:12,fontWeight:700,margin:"10px 0 4px"}}>Alterações (da mais recente para a mais antiga)</div><HistTabela linhas={lista} print/>
+      </div></PrintShell>}
+  </div>);
+}
+// botão 🕘 de um registro (compra ou baixa): abre só as alterações dele
+function TxHist({keys,textos,titulo,small}){
+  const history=useContext(HistCtx);const[open,setOpen]=useState(false);
+  const linhas=open?hDoRegistro(history,keys,textos):[];
+  return(<>{<button title="Histórico deste registro" onClick={e=>{e.stopPropagation();setOpen(true);}} style={{background:small?"none":Z.bd,color:Z.tx2,border:"none",borderRadius:4,padding:small?"0 3px":"4px 9px",fontSize:small?11:9,cursor:"pointer",fontFamily:Z.ft}}>🕘{small?"":" Histórico"}</button>}
+    {open&&ReactDOM.createPortal(<div onClick={()=>setOpen(false)} style={{position:"fixed",inset:0,background:"rgba(0,0,0,.75)",zIndex:350,display:"flex",alignItems:"center",justifyContent:"center",padding:14,fontFamily:Z.ft}}>
+      <div onClick={e=>e.stopPropagation()} style={{background:Z.cd,border:`1px solid ${Z.bd2}`,borderRadius:10,padding:14,width:"100%",maxWidth:560,maxHeight:"85vh",overflowY:"auto"}}>
+        <div style={{display:"flex",justifyContent:"space-between",gap:8,alignItems:"flex-start",marginBottom:8}}><div><div style={{fontSize:12,fontWeight:600,color:Z.ac}}>Histórico do registro</div><div style={{fontSize:11,color:Z.tx2}}>{titulo}</div></div>
+          <button onClick={()=>setOpen(false)} style={{background:Z.cd2,color:Z.tx,border:`1px solid ${Z.bd}`,borderRadius:6,padding:"5px 10px",fontSize:11,cursor:"pointer"}}>Fechar</button></div>
+        {linhas.length?<HistTabela linhas={linhas}/>:<div style={{fontSize:11,color:Z.tx3,padding:"8px 0"}}>Nenhuma alteração registrada para este registro. O histórico começou em 15/10/2026; lançamentos anteriores a essa data não têm registro.</div>}
+      </div></div>,document.body)}</>);
 }
 
 function App(){
@@ -778,7 +873,7 @@ function App(){
     // gravações em fila: com uma em andamento, espera ela terminar (senão a seguinte usaria a versão antiga e daria conflito)
     const fire=async()=>{if(busy.current){tr.current=setTimeout(fire,300);return;}tr.current=null;busy.current=true;const next={purchases:ps,people:ppl,baixas,incOk,corr,ajustes};const changes=diffData(baseRef.current,next);const ops=opsData(baseRef.current,next);setSaving(true);
       try{
-        if(!initFB()){const now=new Date().toISOString();await svLocal({...next,updatedAt:now});svRef.current=snap;baseRef.current=next;setLastUpdate(now);setHistory(h=>changes.length?[...h,{ts:now,user:user.email,changes}]:h);tt("Salvo localmente");return;}
+        if(!initFB()){const now=new Date().toISOString();await svLocal({...next,updatedAt:now});svRef.current=snap;baseRef.current=next;setLastUpdate(now);setHistory(h=>changes.length?[...h,{ts:now,user:user.email,changes:[...changes],refs:changes.refs}]:h);tt("Salvo localmente");return;}
         const r=await saveTx(next,Math.max(revRef.current,0),changes,user.email);
         revRef.current=r.rev;svRef.current=snap;baseRef.current=next;setLastUpdate(r.now);setHistory(r.hist);tt("Salvo no Firebase ☁");notifyEmail(ops,user.email);
       }catch(e){
@@ -886,18 +981,18 @@ function App(){
       <span>Última atualização: <span style={{color:Z.ac,fontFamily:Z.mn}}>{lastUpdate?new Date(lastUpdate).toLocaleString("pt-BR",{day:"2-digit",month:"2-digit",year:"numeric",hour:"2-digit",minute:"2-digit"}):"—"}</span></span>
     </div>
 
-    <main style={{padding:18,maxWidth:1100,margin:"0 auto",animation:"fi .25s ease"}}>
+    <HistCtx.Provider value={history}><main style={{padding:18,maxWidth:1100,margin:"0 auto",animation:"fi .25s ease"}}>
       {tab==="dashboard"&&<Dash {...{mt,sm,setSm,cmp,td,ap,am,ps,baixas,setBaixas,ajustes,setAjustes,setIncOk}} isAdmin={canEdit} canAj={!!P.inconsistencias}/>}
       {tab==="purchases"&&<Purch {...{ps,setPs,sr,setSr,setEp}} isAdmin={canEdit}/>}
       {tab==="baixas"&&<BaixasView {...{baixas,setBaixas,mt,am}} isAdmin={canEdit}/>}
       {/*tab==="people"&&<Ppl ppl={ppl} setPpl={setPpl} isAdmin={isAdmin}/>*/}
       {tab==="reports"&&<Rpts {...{ps,mt,am}}/>}
-      {tab==="relatorios"&&<Relat {...{ps,baixas,mt,am,incOk,ajustes}} isAdmin={!!P.inconsistencias}/>}
+      {tab==="relatorios"&&<Relat {...{ps,baixas,mt,am,incOk,ajustes,history}} isAdmin={!!P.inconsistencias} admin={isAdmin}/>}
       {tab==="incons"&&P.inconsistencias&&<Incons {...{ps,baixas,incOk,setIncOk,user,ajustes,setAjustes,am}}/>}
-      {tab==="history"&&<Hist history={history}/>}
+      {tab==="history"&&<Hist history={history} canExport={!!P.exportar} canPrint={isAdmin}/>}
       {tab==="usuarios"&&P.usuarios&&<Usuarios user={user}/>}
       {tab==="correcoes"&&isAdmin&&<Correcoes list={corrList} {...{ps,baixas,setPs,setBaixas,corr,setCorr,user,tt}}/>}
-    </main>
+    </main></HistCtx.Provider>
 
     {sf&&<Frm lojas={lojasList} user={user} onClose={()=>setSf(false)} onSave={p=>{setPs(v=>[...v,{...p,id:Date.now()}]);setSf(false);tt("Compra cadastrada!");}}/>}
     {ep&&<Frm lojas={lojasList} user={user} purchase={ep} onClose={()=>setEp(null)} onSave={p=>{setPs(v=>v.map(x=>x.id===ep.id?{...x,...p}:x));setEp(null);tt("Atualizado!");}}/>}
@@ -941,7 +1036,7 @@ function Dash({mt,sm,setSm,cmp,td,ap,am,ps,baixas,setBaixas,isAdmin,ajustes,setA
     else if(!isValidDate(bxDate))e.date="Data inválida";
     setBxErr(e);
     if(Object.keys(e).length>0)return;
-    let anexos=null;if(bxFile){setBxBusy(true);try{anexos=[await saveAnexo(bxFile,currentUser(),{tipo:"baixa",mes:sm,data:bxDate})];}catch(er){setBxBusy(false);alert("Não foi possível anexar o comprovante: "+(er.message||er));return;}setBxBusy(false);}
+    let anexos=null;if(bxFile){setBxBusy(true);try{anexos=[await saveAnexo(bxFile,currentUser(),{tipo:"baixa",mes:sm,data:bxDate})];}catch(er){setBxBusy(false);if(!salvarSemAnexo(er,"a baixa"))return;}setBxBusy(false);}
     setBaixas(prev=>{const updated={...prev};const list=[...(updated[sm]||[]),{amount:amt,date:bxDate,...(anexos?{anexos}:{})}];updated[sm]=list;return updated;});
     setBxAmt("");setBxDate("");setShowAddBx(false);setBxErr({});setBxFile(null);
   };
@@ -979,7 +1074,7 @@ function Dash({mt,sm,setSm,cmp,td,ap,am,ps,baixas,setBaixas,isAdmin,ajustes,setA
         <tbody>{mBaixas.map((b,i)=>(<tr key={i} style={{borderTop:`1px solid ${Z.bd}`}}>
           <td style={{padding:"4px 0",color:Z.tx3}}>{i+1}</td>
           <td style={{padding:"4px 0",textAlign:"right",fontFamily:Z.mn,color:Z.gn}}>{fB(b.amount)}</td>
-          <td style={{padding:"4px 0",textAlign:"right",color:Z.tx3}}>{b.anexos?.length>0&&<span style={{marginRight:5}}><AnexoChips ids={b.anexos} small/></span>}{fD(b.date)}</td>
+          <td style={{padding:"4px 0",textAlign:"right",color:Z.tx3}}>{b.anexos?.length>0&&<span style={{marginRight:5}}><AnexoChips ids={b.anexos} small/></span>}{fD(b.date)}<TxHist small keys={[`b:${sm}|${b.date}|${b.amount}`]} textos={[`em ${sm}: ${fB(b.amount)} (${fD(b.date)})`]} titulo={`Baixa da fatura de ${sm}: ${fB(b.amount)} paga em ${fD(b.date)}`}/></td>
           <td style={{padding:"4px 0",textAlign:"center"}}>{isAdmin&&<button onClick={()=>removeBaixa(i)} style={{background:"none",border:"none",color:Z.rd,fontSize:10,cursor:"pointer",padding:"2px 4px"}}>✕</button>}</td>
         </tr>))}</tbody>
       </table>)}
@@ -1106,9 +1201,12 @@ function Purch({ps,setPs,sr,setSr,setEp,isAdmin}){
       </div>
       {ie&&(<div style={{padding:"0 12px 10px",borderTop:`1px solid ${Z.bd}`,animation:"fi .15s ease"}}>
         {p.anexos?.length>0&&<div style={{margin:"8px 0 2px"}}><AnexoChips ids={p.anexos}/></div>}
-        {isAdmin&&<div style={{display:"flex",gap:5,margin:"8px 0 5px",justifyContent:"flex-end"}}>
+        {<div style={{display:"flex",gap:5,margin:"8px 0 5px",justifyContent:"flex-end"}}>
+          <span style={{marginRight:"auto"}}><TxHist keys={["c:"+p.id]} textos={[`${p.loja} (${fD(p.data)})`]} titulo={`Compra ${p.loja} (${fD(p.data)}) – ${fB(p.total)} em ${p.parcelas}x`}/></span>
+          {isAdmin&&<>
           <button onClick={e=>{e.stopPropagation();setEp(p);}} style={{background:Z.bd,color:Z.ac,border:"none",borderRadius:4,padding:"4px 9px",fontSize:9,cursor:"pointer"}}>Editar</button>
           <button onClick={e=>{e.stopPropagation();if(confirm("Excluir?"))setPs(v=>v.filter(x=>x.id!==p.id));}} style={{background:"#1a1015",color:Z.rd,border:"none",borderRadius:4,padding:"4px 9px",fontSize:9,cursor:"pointer"}}>Excluir</button>
+          </>}
         </div>}
         <table style={{width:"100%",fontSize:10,borderCollapse:"collapse"}}><thead><tr style={{color:Z.tx3}}><th style={{textAlign:"left",padding:"4px 0",fontWeight:500}}>Mês</th><th style={{textAlign:"right",padding:"4px 0",fontWeight:500}}>Valor</th><th style={{textAlign:"center",padding:"4px 0",fontWeight:500}}>Parcela</th></tr></thead><tbody>{(isCompleted?mk:futureMonths).map((m)=>{const allIdx=mk.indexOf(m);return(<tr key={m} style={{borderTop:`1px solid ${Z.bd}`,background:m===cmk()?`${Z.ac3}15`:"transparent"}}><td style={{padding:"4px 0",color:m===cmk()?Z.ac:Z.tx}}>{m}{m===cmk()?" ←":""}</td><td style={{padding:"4px 0",textAlign:"right",fontFamily:Z.mn,color:isCompleted?Z.gn:Z.ac}}>{fB(p.monthly[m])}</td><td style={{padding:"4px 0",textAlign:"center",color:Z.tx3,fontWeight:m===cmk()?600:400}}>{allIdx+1}/{p.parcelas}</td></tr>);})}</tbody></table>
       </div>)}
@@ -1191,6 +1289,9 @@ function blobToB64(b){return new Promise((ok,err)=>{const r=new FileReader();r.o
 function b64ToBlob(b64,tipo){const bin=atob(b64);const u=new Uint8Array(bin.length);for(let i=0;i<bin.length;i++)u[i]=bin.charCodeAt(i);return new Blob([u],{type:tipo});}
 // fotos são reduzidas (lado maior 1600 px, JPEG) para caber bem na base
 function compressImage(file){return new Promise((ok,err)=>{const img=new Image();img.onload=()=>{const k=Math.min(1,1600/Math.max(img.width,img.height));const c=document.createElement("canvas");c.width=Math.round(img.width*k);c.height=Math.round(img.height*k);c.getContext("2d").drawImage(img,0,0,c.width,c.height);URL.revokeObjectURL(img.src);c.toBlob(b=>b?ok(b):err(new Error("Falha ao comprimir")),"image/jpeg",.78);};img.onerror=()=>err(new Error("Imagem inválida"));img.src=URL.createObjectURL(file);});}
+// falha ao gravar o comprovante: mostra o motivo e pergunta se salva o registro sem ele
+function motivoAnexo(e){const m=String(e?.code||e?.message||e||"");return /permission/i.test(m)?"sem permissão para gravar arquivos":/unavailable|network|offline|deadline/i.test(m)?"sem conexão com a internet ou conexão instável":/8 MB/.test(m)?"arquivo maior que 8 MB":/inválida|comprimir/i.test(m)?"formato de imagem não suportado neste aparelho (tente um print da tela ou PDF)":m;}
+const salvarSemAnexo=(e,oque)=>confirm(`Não foi possível gravar o comprovante: ${motivoAnexo(e)}.\n\nOK: salvar ${oque} sem o comprovante (dá para anexar depois).\nCancelar: voltar ao formulário e tentar de novo.`);
 async function saveAnexo(file,who,ref){
   const isImg=(file.type||"").startsWith("image/");const blob=isImg?await compressImage(file):file;const tipo=isImg?"image/jpeg":(file.type||"application/pdf");
   if(blob.size>ANX_MAX)throw new Error("arquivo maior que 8 MB");
@@ -1292,7 +1393,7 @@ function Frm({purchase:pu,onClose,onSave,lojas,user}){
     const tv=parseMoney(tt);const pv=parseInt(pc)||1;const vp=Math.round((tv/pv)*100)/100;
     const si=MO.indexOf(startM);const m={};for(let i=0;i<pv&&si+i<MO.length;i++)m[MO[si+i]]=vp;
     let anexos=pu?.anexos||[];
-    if(file){setBusy(true);try{anexos=[...anexos,await saveAnexo(file,user?.email,{tipo:"compra",loja:lj.trim(),data:dt})];}catch(e){setBusy(false);alert("Não foi possível anexar o comprovante: "+(e.message||e));return;}}
+    if(file){setBusy(true);try{anexos=[...anexos,await saveAnexo(file,user?.email,{tipo:"compra",loja:lj.trim(),data:dt})];}catch(e){setBusy(false);if(!salvarSemAnexo(e,"a compra"))return;}}
     onSave({loja:lj.trim(),total:tv,parcelas:pv,data:dt||null,monthly:m,...(anexos.length?{anexos}:{})});
   };
 
@@ -1464,7 +1565,7 @@ function BaixasView({baixas,setBaixas,mt,am,isAdmin}){
     else if(!isValidDate(bDate))e.date="Data inválida";
     setBErr(e);
     if(Object.keys(e).length>0)return;
-    let anexos=null;if(bFile){setBBusy(true);try{anexos=[await saveAnexo(bFile,currentUser(),{tipo:"baixa",mes:selM,data:bDate})];}catch(er){setBBusy(false);alert("Não foi possível anexar o comprovante: "+(er.message||er));return;}setBBusy(false);}
+    let anexos=null;if(bFile){setBBusy(true);try{anexos=[await saveAnexo(bFile,currentUser(),{tipo:"baixa",mes:selM,data:bDate})];}catch(er){setBBusy(false);if(!salvarSemAnexo(er,"a baixa"))return;}setBBusy(false);}
     setBaixas(prev=>{const u={...prev};u[selM]=[...(u[selM]||[]),{amount:amt,date:bDate,...(anexos?{anexos}:{})}];return u;});
     setBAmt("");setBDate("");setShowAdd(false);setBErr({});setBFile(null);
   };
@@ -1530,7 +1631,7 @@ function BaixasView({baixas,setBaixas,mt,am,isAdmin}){
         </tr>):(<tr key={i} style={{borderTop:`1px solid ${Z.bd}`,cursor:isAdmin?"pointer":"default"}} onDoubleClick={()=>isAdmin&&startEdit(i)}>
           <td style={{padding:"6px 0",color:Z.tx3}}>{i+1}</td>
           <td style={{padding:"6px 0",textAlign:"right",fontFamily:Z.mn,color:Z.gn,fontWeight:600}}>{fB(b.amount)}</td>
-          <td style={{padding:"6px 0",textAlign:"right",color:Z.tx3}}>{b.anexos?.length>0&&<span style={{marginRight:5}}><AnexoChips ids={b.anexos} small/></span>}{b.date?fD(b.date):"—"}</td>
+          <td style={{padding:"6px 0",textAlign:"right",color:Z.tx3}}>{b.anexos?.length>0&&<span style={{marginRight:5}}><AnexoChips ids={b.anexos} small/></span>}{b.date?fD(b.date):"—"}<TxHist small keys={[`b:${selM}|${b.date}|${b.amount}`]} textos={[`em ${selM}: ${fB(b.amount)} (${fD(b.date)})`]} titulo={`Baixa da fatura de ${selM}: ${fB(b.amount)} paga em ${fD(b.date)}`}/></td>
           <td style={{padding:"6px 0",textAlign:"center"}}>{isAdmin&&<button onClick={()=>remBx(i)} style={{background:"none",border:"none",color:Z.rd,fontSize:11,cursor:"pointer",padding:"2px 4px"}}>✕</button>}</td>
         </tr>))}</tbody>
         <tfoot><tr style={{borderTop:`2px solid ${Z.bd2}`}}>
