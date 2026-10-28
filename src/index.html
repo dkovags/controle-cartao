@@ -33,7 +33,11 @@ const MN=["Janeiro","Fevereiro","Março","Abril","Maio","Junho","Julho","Agosto"
 // Calendário interno gerado (Abril/2023 até dezembro de daqui a 10 anos), sem limite fixo de data
 const MO=(()=>{const a=[];const fy=new Date().getFullYear()+10;for(let y=2023;y<=fy;y++)for(let m=y===2023?3:0;m<12;m++)a.push(`${MN[m]}/${y}`);return a;})();
 function pmk(k){if(!k)return null;const p=k.split("/");if(p.length!==2)return null;return{month:MM[p[0]]??0,year:parseInt(p[1])};}
-function cmk(){const n=new Date();return`${MN[n.getMonth()]}/${n.getFullYear()}`;}
+// datas e horas sempre no horário de Brasília, qualquer que seja o fuso do aparelho
+const TZ="America/Sao_Paulo";
+const dLoc=t=>new Intl.DateTimeFormat("en-CA",{timeZone:TZ,year:"numeric",month:"2-digit",day:"2-digit"}).format(new Date(t??Date.now()));
+const brHoje=()=>{const[y,m,d]=dLoc().split("-").map(Number);return{y,m,d};};
+function cmk(){const n=brHoje();return`${MN[n.m-1]}/${n.y}`;}
 function fB(v){if(v==null||isNaN(v))return"R$ 0,00";const n=Object.is(v,-0)||Math.abs(v)<0.005?0:v;return"R$ "+n.toLocaleString("pt-BR",{minimumFractionDigits:2,maximumFractionDigits:2});}
 // Chave numérica (aaaammdd) da data da compra, para ordenar; aceita dd/mm/aa e dd/mm/aaaa
 function dKey(p){const d=p.data;if(!d)return 0;const m=d.match(/^(\d{2})\/(\d{2})\/(\d{2}|\d{4})$/);if(!m)return 0;const y=m[3].length===2?2000+ +m[3]:+m[3];return y*1e4+ +m[2]*100+ +m[1];}
@@ -177,8 +181,8 @@ function notifyEmail(ops,who){
   try{fetch(EMAIL_HOOK,{method:"POST",mode:"no-cors",headers:{"Content-Type":"text/plain;charset=utf-8"},body:JSON.stringify({token:EMAIL_TOKEN,ambiente:IS_HML?"homologação":"produção",usuario:who,quando:new Date().toISOString(),ops})}).catch(()=>{});}catch{}
 }
 function downloadBackup(data){
-  const d=new Date();const ds=`${d.getFullYear()}-${String(d.getMonth()+1).padStart(2,"0")}-${String(d.getDate()).padStart(2,"0")}`;
-  const blob=new Blob([JSON.stringify({_backup:{geradoEm:d.toISOString(),ambiente:IS_HML?"homologação":"produção",documento:DOC_PATH},...data},null,2)],{type:"application/json"});
+  const ds=dLoc();
+  const blob=new Blob([JSON.stringify({_backup:{geradoEm:new Date().toISOString(),ambiente:IS_HML?"homologação":"produção",documento:DOC_PATH},...data},null,2)],{type:"application/json"});
   const a=document.createElement("a");a.href=URL.createObjectURL(blob);a.download=`backup-cpc${IS_HML?"-hml":""}-${ds}.json`;document.body.appendChild(a);a.click();a.remove();setTimeout(()=>URL.revokeObjectURL(a.href),1e3);
 }
 
@@ -238,7 +242,7 @@ function exportXLSX(ps,baixas,ppl,mt){
   });
   if(terRows.length>1){const wsT=XLSX.utils.aoa_to_sheet(terRows);XLSX.utils.book_append_sheet(wb,wsT,"Terceiros");}
 
-  const hoje=new Date();const ts=`${String(hoje.getDate()).padStart(2,"0")}${String(hoje.getMonth()+1).padStart(2,"0")}${hoje.getFullYear()}`;
+  const ts=dLoc().split("-").reverse().join("");
   XLSX.writeFile(wb,`CPC_Export_${ts}.xlsx`);
 }
 
@@ -247,7 +251,7 @@ const pTh={textAlign:"left",padding:"6px 8px",borderBottom:"2px solid #333",font
 const pTd={padding:"5px 8px",borderBottom:"1px solid #ddd",fontSize:11,verticalAlign:"top"};
 const pR={textAlign:"right",whiteSpace:"nowrap"};
 const pTf={...pTd,fontWeight:700,borderTop:"2px solid #333",borderBottom:"none"};
-const nowBR=()=>new Date().toLocaleString("pt-BR",{day:"2-digit",month:"2-digit",year:"numeric",hour:"2-digit",minute:"2-digit"});
+const nowBR=()=>new Date().toLocaleString("pt-BR",{timeZone:TZ,day:"2-digit",month:"2-digit",year:"numeric",hour:"2-digit",minute:"2-digit"});
 // Janela com prévia em folha branca; ao imprimir, só a folha sai no papel
 // Nome do arquivo ao "Salvar como PDF": o navegador usa o título da página
 const pdfName=(title,comp)=>`${IS_HML?"[HML] ":""}${title} - ${comp}`.replace(/\//g,"-");
@@ -515,7 +519,7 @@ function Incons({ps,baixas,incOk,setIncOk,user,ajustes,setAjustes,am}){
   const card={background:Z.cd,border:`1px solid ${Z.bd}`,borderRadius:10,padding:16,marginBottom:18};
   const btn={background:`linear-gradient(135deg,${Z.ac3},${Z.ac2})`,color:"#fff",border:"none",borderRadius:6,padding:"7px 14px",fontSize:11,fontWeight:600,cursor:"pointer",fontFamily:Z.ft};
   const btn2={background:Z.cd2,color:Z.tx2,border:`1px solid ${Z.bd}`,borderRadius:6,padding:"7px 12px",fontSize:11,cursor:"pointer",fontFamily:Z.ft};
-  const fmt=t=>new Date(t).toLocaleString("pt-BR",{day:"2-digit",month:"2-digit",year:"numeric",hour:"2-digit",minute:"2-digit"});
+  const fmt=t=>new Date(t).toLocaleString("pt-BR",{timeZone:TZ,day:"2-digit",month:"2-digit",year:"numeric",hour:"2-digit",minute:"2-digit"});
   return(<div style={card}>
     <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",gap:8,flexWrap:"wrap",marginBottom:8}}>
       <div style={{fontSize:12,fontWeight:600,color:Z.ac}}>Análise de inconsistências</div>
@@ -683,7 +687,7 @@ function Correcoes({list,ps,baixas,setPs,setBaixas,corr,setCorr,user,tt}){
   const card={background:Z.cd,border:`1px solid ${Z.bd}`,borderRadius:10,padding:16,marginBottom:14};
   const btn={background:`linear-gradient(135deg,${Z.ac3},${Z.ac2})`,color:"#fff",border:"none",borderRadius:6,padding:"8px 16px",fontSize:12,fontWeight:600,cursor:"pointer",fontFamily:Z.ft};
   const btn2={background:Z.cd2,color:Z.tx2,border:`1px solid ${Z.bd}`,borderRadius:6,padding:"8px 14px",fontSize:12,cursor:"pointer",fontFamily:Z.ft};
-  const fmt=t=>new Date(t).toLocaleString("pt-BR",{day:"2-digit",month:"2-digit",year:"numeric",hour:"2-digit",minute:"2-digit"});
+  const fmt=t=>new Date(t).toLocaleString("pt-BR",{timeZone:TZ,day:"2-digit",month:"2-digit",year:"numeric",hour:"2-digit",minute:"2-digit"});
   if(!list)return<div style={card}><div style={{fontSize:11,color:Z.tx2}}>Carregando…</div></div>;
   const pend=list.filter(k=>!corr[k.id]);const feitas=list.filter(k=>corr[k.id]);
   const decidir=(k,status,plan)=>{if(status==="aplicada"){if(!confirm(`Aplicar a correção "${k.titulo}"?`))return;setPs(plan.ps);setBaixas(plan.baixas);}
@@ -711,9 +715,7 @@ function Correcoes({list,ps,baixas,setPs,setBaixas,corr,setCorr,user,tt}){
 
 // ─── HISTÓRICO ───
 const HistCtx=React.createContext([]);
-// data local (aaaa-mm-dd) para filtrar por dia no fuso do aparelho
-const dLoc=t=>{const d=new Date(t);return`${d.getFullYear()}-${String(d.getMonth()+1).padStart(2,"0")}-${String(d.getDate()).padStart(2,"0")}`;};
-const fmtTs=t=>new Date(t).toLocaleString("pt-BR",{day:"2-digit",month:"2-digit",year:"numeric",hour:"2-digit",minute:"2-digit"});
+const fmtTs=t=>new Date(t).toLocaleString("pt-BR",{timeZone:TZ,day:"2-digit",month:"2-digit",year:"numeric",hour:"2-digit",minute:"2-digit"});
 const H_TIPOS=[["compra","Compras"],["baixa","Baixas"],["ajuste","Ajustes"],["incons","Inconsistências"],["usuario","Usuários e perfis"],["correcao","Correções"],["outro","Outros"]];
 function hTipo(t){return /compra/i.test(t)&&!/^Inconsist|^Ajuste/.test(t)?"compra":/baixa/i.test(t)&&!/^Inconsist|^Ajuste/.test(t)?"baixa":/^Ajuste/.test(t)?"ajuste":/^Inconsist/.test(t)?"incons":/^(Usuário|Perfil)/.test(t)?"usuario":/^Correç/.test(t)?"correcao":/ loja .* → /.test(t)?"compra":"outro";}
 function hAcao(t){return /^(Nova|Novo|Ajuste lançado|Usuário incluído|Perfil incluído)/.test(t)?"Inclusão":/(excluíd|removid)/i.test(t)?"Exclusão":"Alteração";}
@@ -770,8 +772,9 @@ function Hist({history,canExport,canPrint}){
 }
 // Relatório de alterações (só administrador): período, tipo e usuário; resumo e lista detalhada
 function RelAlt({history,card,sel,btn}){
-  const iso=d=>dLoc(d);const hoje=new Date();const br=x=>x.split("-").reverse().join("/");
-  const pres=[["mes","Este mês",()=>[iso(new Date(hoje.getFullYear(),hoje.getMonth(),1)),iso(hoje)]],["ant","Mês anterior",()=>[iso(new Date(hoje.getFullYear(),hoje.getMonth()-1,1)),iso(new Date(hoje.getFullYear(),hoje.getMonth(),0))]],["7","Últimos 7 dias",()=>[iso(new Date(hoje-6*864e5)),iso(hoje)]],["tudo","Tudo",()=>["",""]]];
+  const br=x=>x.split("-").reverse().join("/");const h=brHoje();const p2=v=>String(v).padStart(2,"0");const hj=dLoc();
+  const fimMes=(y,m)=>`${y}-${p2(m)}-${p2(new Date(Date.UTC(y,m,0)).getUTCDate())}`;const ay=h.m===1?h.y-1:h.y,am=h.m===1?12:h.m-1;
+  const pres=[["mes","Este mês",()=>[`${h.y}-${p2(h.m)}-01`,hj]],["ant","Mês anterior",()=>[`${ay}-${p2(am)}-01`,fimMes(ay,am)]],["7","Últimos 7 dias",()=>[dLoc(Date.now()-6*864e5),hj]],["tudo","Tudo",()=>["",""]]];
   const[de,setDe]=useState(pres[0][2]()[0]);const[ate,setAte]=useState(pres[0][2]()[1]);const[tipo,setTipo]=useState("");const[usr,setUsr]=useState("");const[open,setOpen]=useState(false);
   const todas=useMemo(()=>hLinhas(history),[history]);const users=[...new Set(todas.map(l=>l.user))].sort();
   const lista=todas.filter(l=>(!tipo||l.tipo===tipo)&&(!usr||l.user===usr)&&(!de||dLoc(l.ts)>=de)&&(!ate||dLoc(l.ts)<=ate));
@@ -803,13 +806,13 @@ function RelAlt({history,card,sel,btn}){
   </div>);
 }
 // botão 🕘 de um registro (compra ou baixa): abre só as alterações dele
-function TxHist({keys,textos,titulo,small}){
+function TxHist({keys,textos,titulo,small,anexos}){
   const history=useContext(HistCtx);const[open,setOpen]=useState(false);
   const linhas=open?hDoRegistro(history,keys,textos):[];
   return(<>{<button title="Histórico deste registro" onClick={e=>{e.stopPropagation();setOpen(true);}} style={{background:small?"none":Z.bd,color:Z.tx2,border:"none",borderRadius:4,padding:small?"0 3px":"4px 9px",fontSize:small?11:9,cursor:"pointer",fontFamily:Z.ft}}>🕘{small?"":" Histórico"}</button>}
     {open&&ReactDOM.createPortal(<div onClick={()=>setOpen(false)} style={{position:"fixed",inset:0,background:"rgba(0,0,0,.75)",zIndex:350,display:"flex",alignItems:"center",justifyContent:"center",padding:14,fontFamily:Z.ft}}>
       <div onClick={e=>e.stopPropagation()} style={{background:Z.cd,border:`1px solid ${Z.bd2}`,borderRadius:10,padding:14,width:"100%",maxWidth:560,maxHeight:"85vh",overflowY:"auto"}}>
-        <div style={{display:"flex",justifyContent:"space-between",gap:8,alignItems:"flex-start",marginBottom:8}}><div><div style={{fontSize:12,fontWeight:600,color:Z.ac}}>Histórico do registro</div><div style={{fontSize:11,color:Z.tx2}}>{titulo}</div></div>
+        <div style={{display:"flex",justifyContent:"space-between",gap:8,alignItems:"flex-start",marginBottom:8}}><div><div style={{fontSize:12,fontWeight:600,color:Z.ac}}>Histórico do registro</div><div style={{fontSize:11,color:Z.tx2}}>{titulo}</div>{anexos?.length>0&&<div style={{marginTop:6}}><AnexoChips ids={anexos}/></div>}</div>
           <button onClick={()=>setOpen(false)} style={{background:Z.cd2,color:Z.tx,border:`1px solid ${Z.bd}`,borderRadius:6,padding:"5px 10px",fontSize:11,cursor:"pointer"}}>Fechar</button></div>
         {linhas.length?<HistTabela linhas={linhas}/>:<div style={{fontSize:11,color:Z.tx3,padding:"8px 0"}}>Nenhuma alteração registrada para este registro. O histórico começou em 15/10/2026; lançamentos anteriores a essa data não têm registro.</div>}
       </div></div>,document.body)}</>);
@@ -978,7 +981,7 @@ function App(){
     {novaVer&&<div style={{display:"flex",gap:10,alignItems:"center",justifyContent:"center",flexWrap:"wrap",padding:"8px 18px",background:`${Z.yl}18`,borderBottom:`1px solid ${Z.yl}50`,fontSize:12,color:Z.tx}}><span>Há uma versão nova do app ({novaVer}).</span><button onClick={()=>location.reload()} style={{background:Z.yl,color:"#111",border:"none",borderRadius:6,padding:"5px 12px",fontSize:12,fontWeight:700,cursor:"pointer"}}>Atualizar agora</button></div>}
     <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",padding:"6px 18px",background:Z.bg,borderBottom:`1px solid ${Z.bd}`,fontSize:10,color:Z.tx3,flexWrap:"wrap",gap:4}}>
       <span>Fechamento da fatura: <span style={{color:Z.yl,fontWeight:600}}>dia 19 de cada mês</span> <span style={{marginLeft:6,opacity:.7}}>· versão {APP_VERSION}</span></span>
-      <span>Última atualização: <span style={{color:Z.ac,fontFamily:Z.mn}}>{lastUpdate?new Date(lastUpdate).toLocaleString("pt-BR",{day:"2-digit",month:"2-digit",year:"numeric",hour:"2-digit",minute:"2-digit"}):"—"}</span></span>
+      <span>Última atualização: <span style={{color:Z.ac,fontFamily:Z.mn}}>{lastUpdate?new Date(lastUpdate).toLocaleString("pt-BR",{timeZone:TZ,day:"2-digit",month:"2-digit",year:"numeric",hour:"2-digit",minute:"2-digit"}):"—"}</span></span>
     </div>
 
     <HistCtx.Provider value={history}><main style={{padding:18,maxWidth:1100,margin:"0 auto",animation:"fi .25s ease"}}>
@@ -1074,7 +1077,7 @@ function Dash({mt,sm,setSm,cmp,td,ap,am,ps,baixas,setBaixas,isAdmin,ajustes,setA
         <tbody>{mBaixas.map((b,i)=>(<tr key={i} style={{borderTop:`1px solid ${Z.bd}`}}>
           <td style={{padding:"4px 0",color:Z.tx3}}>{i+1}</td>
           <td style={{padding:"4px 0",textAlign:"right",fontFamily:Z.mn,color:Z.gn}}>{fB(b.amount)}</td>
-          <td style={{padding:"4px 0",textAlign:"right",color:Z.tx3}}>{b.anexos?.length>0&&<span style={{marginRight:5}}><AnexoChips ids={b.anexos} small/></span>}{fD(b.date)}<TxHist small keys={[`b:${sm}|${b.date}|${b.amount}`]} textos={[`em ${sm}: ${fB(b.amount)} (${fD(b.date)})`]} titulo={`Baixa da fatura de ${sm}: ${fB(b.amount)} paga em ${fD(b.date)}`}/></td>
+          <td style={{padding:"4px 0",textAlign:"right",color:Z.tx3}}>{b.anexos?.length>0&&<span style={{marginRight:5}}><AnexoChips ids={b.anexos} small/></span>}{fD(b.date)}<TxHist small anexos={b.anexos} keys={[`b:${sm}|${b.date}|${b.amount}`]} textos={[`em ${sm}: ${fB(b.amount)} (${fD(b.date)})`]} titulo={`Baixa da fatura de ${sm}: ${fB(b.amount)} paga em ${fD(b.date)}`}/></td>
           <td style={{padding:"4px 0",textAlign:"center"}}>{isAdmin&&<button onClick={()=>removeBaixa(i)} style={{background:"none",border:"none",color:Z.rd,fontSize:10,cursor:"pointer",padding:"2px 4px"}}>✕</button>}</td>
         </tr>))}</tbody>
       </table>)}
@@ -1202,7 +1205,7 @@ function Purch({ps,setPs,sr,setSr,setEp,isAdmin}){
       {ie&&(<div style={{padding:"0 12px 10px",borderTop:`1px solid ${Z.bd}`,animation:"fi .15s ease"}}>
         {p.anexos?.length>0&&<div style={{margin:"8px 0 2px"}}><AnexoChips ids={p.anexos}/></div>}
         {<div style={{display:"flex",gap:5,margin:"8px 0 5px",justifyContent:"flex-end"}}>
-          <span style={{marginRight:"auto"}}><TxHist keys={["c:"+p.id]} textos={[`${p.loja} (${fD(p.data)})`]} titulo={`Compra ${p.loja} (${fD(p.data)}) – ${fB(p.total)} em ${p.parcelas}x`}/></span>
+          <span style={{marginRight:"auto"}}><TxHist anexos={p.anexos} keys={["c:"+p.id]} textos={[`${p.loja} (${fD(p.data)})`]} titulo={`Compra ${p.loja} (${fD(p.data)}) – ${fB(p.total)} em ${p.parcelas}x`}/></span>
           {isAdmin&&<>
           <button onClick={e=>{e.stopPropagation();setEp(p);}} style={{background:Z.bd,color:Z.ac,border:"none",borderRadius:4,padding:"4px 9px",fontSize:9,cursor:"pointer"}}>Editar</button>
           <button onClick={e=>{e.stopPropagation();if(confirm("Excluir?"))setPs(v=>v.filter(x=>x.id!==p.id));}} style={{background:"#1a1015",color:Z.rd,border:"none",borderRadius:4,padding:"4px 9px",fontSize:9,cursor:"pointer"}}>Excluir</button>
@@ -1315,7 +1318,7 @@ function AnexoViewer({aid,onClose}){
   return ReactDOM.createPortal(<div onClick={onClose} style={{position:"fixed",inset:0,background:"rgba(0,0,0,.85)",zIndex:400,display:"flex",flexDirection:"column",alignItems:"center",justifyContent:"center",padding:14,fontFamily:Z.ft}}>
     <div onClick={e=>e.stopPropagation()} style={{background:Z.cd,border:`1px solid ${Z.bd2}`,borderRadius:10,padding:12,maxWidth:"min(760px,100%)",width:"100%",maxHeight:"92vh",display:"flex",flexDirection:"column",gap:8}}>
       <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",gap:8,flexWrap:"wrap"}}>
-        <div style={{fontSize:11,color:Z.tx2,minWidth:0,overflow:"hidden",textOverflow:"ellipsis"}}>{st.meta?<><b style={{color:Z.tx}}>{st.meta.nome}</b> · {(st.meta.tamanho/1024).toFixed(0)} KB · enviado em {new Date(st.meta.criadoEm).toLocaleString("pt-BR",{day:"2-digit",month:"2-digit",year:"numeric",hour:"2-digit",minute:"2-digit"})}{st.meta.criadoPor?` por ${st.meta.criadoPor}`:""}</>:"Comprovante"}</div>
+        <div style={{fontSize:11,color:Z.tx2,minWidth:0,overflow:"hidden",textOverflow:"ellipsis"}}>{st.meta?<><b style={{color:Z.tx}}>{st.meta.nome}</b> · {(st.meta.tamanho/1024).toFixed(0)} KB · enviado em {new Date(st.meta.criadoEm).toLocaleString("pt-BR",{timeZone:TZ,day:"2-digit",month:"2-digit",year:"numeric",hour:"2-digit",minute:"2-digit"})}{st.meta.criadoPor?` por ${st.meta.criadoPor}`:""}</>:"Comprovante"}</div>
         <div style={{display:"flex",gap:6}}>{st.url&&<a href={st.url} download={st.meta.nome} style={btn}>Baixar</a>}{st.url&&<a href={st.url} target="_blank" rel="noopener" style={btn}>Abrir</a>}<button onClick={onClose} style={btn}>Fechar</button></div>
       </div>
       <div style={{flex:1,overflow:"auto",display:"flex",justifyContent:"center",background:Z.bg,borderRadius:6,minHeight:200}}>
@@ -1631,7 +1634,7 @@ function BaixasView({baixas,setBaixas,mt,am,isAdmin}){
         </tr>):(<tr key={i} style={{borderTop:`1px solid ${Z.bd}`,cursor:isAdmin?"pointer":"default"}} onDoubleClick={()=>isAdmin&&startEdit(i)}>
           <td style={{padding:"6px 0",color:Z.tx3}}>{i+1}</td>
           <td style={{padding:"6px 0",textAlign:"right",fontFamily:Z.mn,color:Z.gn,fontWeight:600}}>{fB(b.amount)}</td>
-          <td style={{padding:"6px 0",textAlign:"right",color:Z.tx3}}>{b.anexos?.length>0&&<span style={{marginRight:5}}><AnexoChips ids={b.anexos} small/></span>}{b.date?fD(b.date):"—"}<TxHist small keys={[`b:${selM}|${b.date}|${b.amount}`]} textos={[`em ${selM}: ${fB(b.amount)} (${fD(b.date)})`]} titulo={`Baixa da fatura de ${selM}: ${fB(b.amount)} paga em ${fD(b.date)}`}/></td>
+          <td style={{padding:"6px 0",textAlign:"right",color:Z.tx3}}>{b.anexos?.length>0&&<span style={{marginRight:5}}><AnexoChips ids={b.anexos} small/></span>}{b.date?fD(b.date):"—"}<TxHist small anexos={b.anexos} keys={[`b:${selM}|${b.date}|${b.amount}`]} textos={[`em ${selM}: ${fB(b.amount)} (${fD(b.date)})`]} titulo={`Baixa da fatura de ${selM}: ${fB(b.amount)} paga em ${fD(b.date)}`}/></td>
           <td style={{padding:"6px 0",textAlign:"center"}}>{isAdmin&&<button onClick={()=>remBx(i)} style={{background:"none",border:"none",color:Z.rd,fontSize:11,cursor:"pointer",padding:"2px 4px"}}>✕</button>}</td>
         </tr>))}</tbody>
         <tfoot><tr style={{borderTop:`2px solid ${Z.bd2}`}}>
