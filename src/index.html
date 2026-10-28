@@ -37,6 +37,12 @@ function pmk(k){if(!k)return null;const p=k.split("/");if(p.length!==2)return nu
 const TZ="America/Sao_Paulo";
 const dLoc=t=>new Intl.DateTimeFormat("en-CA",{timeZone:TZ,year:"numeric",month:"2-digit",day:"2-digit"}).format(new Date(t??Date.now()));
 const brHoje=()=>{const[y,m,d]=dLoc().split("-").map(Number);return{y,m,d};};
+// cancelado: continua na lista (riscado), mas fica fora de todos os valores
+const ativo=x=>x?.status!=="cancelada";
+const cancelar=(x,who,oque)=>{const m=prompt(`Cancelar ${oque}? Ela deixa de entrar nos valores, mas continua visível (riscada), com histórico e comprovantes.\n\nMotivo (opcional):`,"");if(m===null)return null;return{...x,status:"cancelada",...(m.trim()?{motivo:m.trim()}:{}),canceladoPor:who||"",canceladoEm:new Date().toISOString()};};
+const reativar=x=>{const{status,motivo,canceladoPor,canceladoEm,...r}=x;return r;};
+const SelCanc=({x})=>x?.status==="cancelada"?<span title={`Cancelada em ${fmtTs(x.canceladoEm)} por ${x.canceladoPor}${x.motivo?" – "+x.motivo:""}`} style={{fontSize:8,fontWeight:700,color:"#fff",background:Z.rd,borderRadius:3,padding:"1px 5px",marginLeft:6,textDecoration:"none",display:"inline-block",verticalAlign:"middle"}}>CANCELADA</span>:null;
+const bxAtivas=bx=>Object.fromEntries(Object.entries(bx||{}).map(([m,l])=>[m,(l||[]).filter(ativo)]));
 function cmk(){const n=brHoje();return`${MN[n.m-1]}/${n.y}`;}
 function fB(v){if(v==null||isNaN(v))return"R$ 0,00";const n=Object.is(v,-0)||Math.abs(v)<0.005?0:v;return"R$ "+n.toLocaleString("pt-BR",{minimumFractionDigits:2,maximumFractionDigits:2});}
 // Chave numérica (aaaammdd) da data da compra, para ordenar; aceita dd/mm/aa e dd/mm/aaaa
@@ -137,7 +143,10 @@ function diffData(a,b){
   const A=new Map(a.purchases.map(p=>[p.id,p])),B=new Map(b.purchases.map(p=>[p.id,p]));
   B.forEach((p,id)=>{if(!A.has(id))add(`Nova compra: ${pd(p)} – ${fB(p.total)} em ${p.parcelas}x${p.anexos?.length?" (com comprovante)":""}`,["c:"+id]);});
   A.forEach((p,id)=>{if(!B.has(id))add(`Compra excluída: ${pd(p)} – ${fB(p.total)} em ${p.parcelas}x`,["c:"+id]);});
-  B.forEach((p,id)=>{const o=A.get(id);if(!o||JSON.stringify(o)===JSON.stringify(p))return;const f=[];
+  const mot=x=>x.motivo?` – motivo: ${x.motivo}`:"";
+  B.forEach((p,id)=>{const o=A.get(id);if(!o||JSON.stringify(o)===JSON.stringify(p))return;
+    if(ativo(o)!==ativo(p)){add(ativo(p)?`Compra reativada: ${pd(p)} – ${fB(p.total)} em ${p.parcelas}x`:`Compra cancelada: ${pd(p)} – ${fB(p.total)} em ${p.parcelas}x${mot(p)}`,["c:"+id]);return;}
+    const f=[];
     if(o.loja!==p.loja)f.push(`loja ${o.loja} → ${p.loja}`);
     if(o.data!==p.data)f.push(`data ${fD(o.data)} → ${fD(p.data)}`);
     if(o.total!==p.total)f.push(`total ${fB(o.total)} → ${fB(p.total)}`);
@@ -148,7 +157,7 @@ function diffData(a,b){
   const bk=x=>`${fB(x.amount)} (${fD(x.date)})${x.anexos?.length?" com comprovante":""}`;
   new Set([...Object.keys(a.baixas),...Object.keys(b.baixas)]).forEach(m=>{
     const o=a.baixas[m]||[],n=b.baixas[m]||[];if(JSON.stringify(o)===JSON.stringify(n))return;
-    if(o.length===n.length){n.forEach((x,i)=>{if(JSON.stringify(x)!==JSON.stringify(o[i]))add(`Baixa alterada em ${m}: ${bk(o[i])} → ${bk(x)}`,[bref(m,x),bref(m,o[i])]);});return;}
+    if(o.length===n.length){n.forEach((x,i)=>{if(JSON.stringify(x)!==JSON.stringify(o[i]))add(ativo(o[i])!==ativo(x)?(ativo(x)?`Baixa reativada em ${m}: ${bk(x)}`:`Baixa cancelada em ${m}: ${bk(x)}${mot(x)}`):`Baixa alterada em ${m}: ${bk(o[i])} → ${bk(x)}`,[bref(m,x),bref(m,o[i])]);});return;}
     const cnt={};o.forEach(x=>{const k=JSON.stringify(x);cnt[k]=(cnt[k]||0)+1;});
     n.forEach(x=>{const k=JSON.stringify(x);if(cnt[k])cnt[k]--;else add(`Nova baixa em ${m}: ${bk(x)}`,[bref(m,x)]);});
     Object.entries(cnt).forEach(([k,c])=>{for(let i=0;i<c;i++)add(`Baixa excluída em ${m}: ${bk(JSON.parse(k))}`,[bref(m,JSON.parse(k))]);});
@@ -718,7 +727,7 @@ const HistCtx=React.createContext([]);
 const fmtTs=t=>new Date(t).toLocaleString("pt-BR",{timeZone:TZ,day:"2-digit",month:"2-digit",year:"numeric",hour:"2-digit",minute:"2-digit"});
 const H_TIPOS=[["compra","Compras"],["baixa","Baixas"],["ajuste","Ajustes"],["incons","Inconsistências"],["usuario","Usuários e perfis"],["correcao","Correções"],["outro","Outros"]];
 function hTipo(t){return /compra/i.test(t)&&!/^Inconsist|^Ajuste/.test(t)?"compra":/baixa/i.test(t)&&!/^Inconsist|^Ajuste/.test(t)?"baixa":/^Ajuste/.test(t)?"ajuste":/^Inconsist/.test(t)?"incons":/^(Usuário|Perfil)/.test(t)?"usuario":/^Correç/.test(t)?"correcao":/ loja .* → /.test(t)?"compra":"outro";}
-function hAcao(t){return /^(Nova|Novo|Ajuste lançado|Usuário incluído|Perfil incluído)/.test(t)?"Inclusão":/(excluíd|removid)/i.test(t)?"Exclusão":"Alteração";}
+function hAcao(t){return /^(Compra|Baixa) cancelada/.test(t)?"Cancelamento":/^(Compra|Baixa) reativada/.test(t)?"Reativação":/^(Nova|Novo|Ajuste lançado|Usuário incluído|Perfil incluído)/.test(t)?"Inclusão":/(excluíd|removid)/i.test(t)?"Exclusão":"Alteração";}
 // uma linha por alteração, da mais recente para a mais antiga
 const hLinhas=history=>{const out=[];[...history].reverse().forEach(h=>(h.changes||[]).forEach((c,k)=>out.push({ts:h.ts,user:h.user,txt:c,refs:(h.refs||[])[k]||null,tipo:hTipo(c),acao:hAcao(c)})));return out;};
 // histórico de um registro: pelas referências gravadas e, nos lançamentos antigos (sem referência), pelo texto;
@@ -727,7 +736,7 @@ function hDoRegistro(history,keys,textos){const ks=new Set(keys);const out=[];
   hLinhas(history).forEach(l=>{const hit=l.refs?l.refs.some(r=>ks.has(r)):textos.some(t=>l.txt.includes(t));if(hit){out.push(l);(l.refs||[]).forEach(r=>ks.add(r));}});return out;}
 function HistTabela({linhas,print}){
   const c=print?{td:{padding:"4px 6px",borderBottom:"1px solid #ddd",fontSize:10,verticalAlign:"top"},th:{padding:"4px 6px",borderBottom:"2px solid #333",fontSize:10,textAlign:"left"}}:{td:{padding:"7px 6px",borderTop:`1px solid ${Z.bd}`,fontSize:11,verticalAlign:"top",color:Z.tx},th:{padding:"4px 6px",fontSize:9,color:Z.tx3,textAlign:"left",fontWeight:500}};
-  const cor=a=>print?"#111":a==="Inclusão"?Z.gn:a==="Exclusão"?Z.rd:Z.yl;
+  const cor=a=>print?"#111":a==="Inclusão"||a==="Reativação"?Z.gn:a==="Exclusão"||a==="Cancelamento"?Z.rd:Z.yl;
   return(<table style={{width:"100%",borderCollapse:"collapse"}}><thead><tr><th style={{...c.th,width:"22%"}}>Data e usuário</th><th style={{...c.th,width:"13%"}}>Ação</th><th style={c.th}>O que mudou</th></tr></thead>
     <tbody>{linhas.map((l,i)=>(<tr key={i}><td style={c.td}><div style={{fontFamily:print?"inherit":Z.mn,color:print?"#111":Z.ac}}>{fmtTs(l.ts)}</div><div style={{fontSize:9,color:print?"#555":Z.tx3,wordBreak:"break-all"}}>{l.user}</div></td>
       <td style={{...c.td,color:cor(l.acao),fontWeight:600}}>{l.acao}</td><td style={c.td}>{l.txt}</td></tr>))}</tbody></table>);
@@ -778,9 +787,9 @@ function RelAlt({history,card,sel,btn}){
   const[de,setDe]=useState(pres[0][2]()[0]);const[ate,setAte]=useState(pres[0][2]()[1]);const[tipo,setTipo]=useState("");const[usr,setUsr]=useState("");const[open,setOpen]=useState(false);
   const todas=useMemo(()=>hLinhas(history),[history]);const users=[...new Set(todas.map(l=>l.user))].sort();
   const lista=todas.filter(l=>(!tipo||l.tipo===tipo)&&(!usr||l.user===usr)&&(!de||dLoc(l.ts)>=de)&&(!ate||dLoc(l.ts)<=ate));
-  const tn=Object.fromEntries(H_TIPOS);const ACS=["Inclusão","Alteração","Exclusão"];
+  const tn=Object.fromEntries(H_TIPOS);const ACS=["Inclusão","Alteração","Cancelamento","Reativação","Exclusão"];
   const per=de||ate?`${de?br(de):"início"} a ${ate?br(ate):"hoje"}`:"todo o período";
-  const cont=(k)=>{const o={};lista.forEach(l=>{const g=l[k];o[g]=o[g]||{Inclusão:0,Alteração:0,Exclusão:0,total:0};o[g][l.acao]++;o[g].total++;});return Object.entries(o).sort((a,b)=>b[1].total-a[1].total);};
+  const cont=(k)=>{const o={};lista.forEach(l=>{const g=l[k];o[g]=o[g]||{Inclusão:0,Alteração:0,Cancelamento:0,Reativação:0,Exclusão:0,total:0};o[g][l.acao]++;o[g].total++;});return Object.entries(o).sort((a,b)=>b[1].total-a[1].total);};
   const td={padding:"4px 6px",borderBottom:"1px solid #ddd",fontSize:10},th={...td,borderBottom:"2px solid #333",textAlign:"left"},nr={...td,textAlign:"right"};
   const Resumo=({k,rot,nome})=>(<table style={{width:"100%",borderCollapse:"collapse",marginBottom:12}}><thead><tr><th style={th}>{rot}</th>{ACS.map(a=><th key={a} style={{...th,textAlign:"right"}}>{a}</th>)}<th style={{...th,textAlign:"right"}}>Total</th></tr></thead>
     <tbody>{cont(k).map(([g,c])=>(<tr key={g}><td style={td}>{nome?nome(g):g}</td>{ACS.map(a=><td key={a} style={nr}>{c[a]||"–"}</td>)}<td style={{...nr,fontWeight:700}}>{c.total}</td></tr>))}</tbody></table>);
@@ -891,11 +900,14 @@ function App(){
   const[novaVer,setNovaVer]=useState(null);
   useEffect(()=>{if(APP_VERSION.startsWith("__"))return;const chk=()=>fetch(location.pathname+"?v="+Date.now(),{cache:"no-store"}).then(r=>r.ok?r.text():"").then(t=>{const v=(/APP_VERSION *= *"([^"]+)"/.exec(t)||[])[1];if(v&&v!==APP_VERSION)setNovaVer(v);}).catch(()=>{});
     chk();const iv=setInterval(chk,5*60e3);const vis=()=>{if(document.visibilityState==="visible")chk();};document.addEventListener("visibilitychange",vis);return()=>{clearInterval(iv);document.removeEventListener("visibilitychange",vis);};},[]);
+  const psA=useMemo(()=>ps.filter(ativo),[ps]);
+  // exclusões aparecem no histórico só para o administrador
+  const histVis=useMemo(()=>isAdmin?history:history.map(h=>{const k=(h.changes||[]).map((c,i)=>i).filter(i=>hAcao(h.changes[i])!=="Exclusão");return k.length===h.changes.length?h:{...h,changes:k.map(i=>h.changes[i]),...(h.refs?{refs:k.map(i=>h.refs[i])}:{})};}).filter(h=>h.changes.length),[history,isAdmin]);const bxA=useMemo(()=>bxAtivas(baixas),[baixas]);
   const am=useMemo(()=>{const s=new Set([cmk()]);ps.forEach(p=>Object.keys(p.monthly).forEach(m=>s.add(m)));Object.keys(baixas).forEach(m=>{if((baixas[m]||[]).length)s.add(m);});return MO.filter(m=>s.has(m));},[ps,baixas]);
-  const mt=useMemo(()=>{const t={};am.forEach(m=>{t[m]=0;});ps.forEach(p=>Object.entries(p.monthly).forEach(([m,v])=>{t[m]=(t[m]||0)+v;}));Object.entries(ajustes).forEach(([m,l])=>(l||[]).forEach(x=>{t[m]=(t[m]||0)+x.valor;}));return t;},[ps,am,ajustes]);
-  const cmp=useMemo(()=>ps.filter(p=>p.monthly[sm]>0),[ps,sm]);
-  const ap=useMemo(()=>ps.filter(p=>{const k=Object.keys(p.monthly);if(!k.length)return true;return MO.indexOf(k[k.length-1])>=MO.indexOf(cmk());}),[ps]);
-  const td=useMemo(()=>{let prov=0;let bx=0;const ci=MO.indexOf(cmk());ps.forEach(p=>Object.entries(p.monthly).forEach(([m,v])=>{if(MO.indexOf(m)>=ci)prov+=v;}));Object.entries(ajustes).forEach(([m,l])=>{if(MO.indexOf(m)>=ci)(l||[]).forEach(x=>{prov+=x.valor;});});MO.forEach((m,i)=>{if(i>=ci)(baixas[m]||[]).forEach(b=>{bx+=b.amount;});});return prov-bx;},[ps,baixas,ajustes]);
+  const mt=useMemo(()=>{const t={};am.forEach(m=>{t[m]=0;});psA.forEach(p=>Object.entries(p.monthly).forEach(([m,v])=>{t[m]=(t[m]||0)+v;}));Object.entries(ajustes).forEach(([m,l])=>(l||[]).forEach(x=>{t[m]=(t[m]||0)+x.valor;}));return t;},[psA,am,ajustes]);
+  const cmp=useMemo(()=>psA.filter(p=>p.monthly[sm]>0),[psA,sm]);
+  const ap=useMemo(()=>psA.filter(p=>{const k=Object.keys(p.monthly);if(!k.length)return true;return MO.indexOf(k[k.length-1])>=MO.indexOf(cmk());}),[psA]);
+  const td=useMemo(()=>{let prov=0;let bx=0;const ci=MO.indexOf(cmk());psA.forEach(p=>Object.entries(p.monthly).forEach(([m,v])=>{if(MO.indexOf(m)>=ci)prov+=v;}));Object.entries(ajustes).forEach(([m,l])=>{if(MO.indexOf(m)>=ci)(l||[]).forEach(x=>{prov+=x.valor;});});MO.forEach((m,i)=>{if(i>=ci)(bxA[m]||[]).forEach(b=>{bx+=b.amount;});});return prov-bx;},[psA,bxA,ajustes]);
 
   const handleLogin=async()=>{setAuthError(null);setAuthLoading(true);const u=await loginGoogle();if(!u)setAuthLoading(false);};
   const handleLogout=async()=>{await logout();setOk(false);setPs([]);setPpl({});setBaixas({});};
@@ -969,7 +981,7 @@ function App(){
         </div>
         {P.backup&&<button onClick={()=>downloadBackup({purchases:ps,people:ppl,baixas,updatedAt:lastUpdate,history})} title="Baixa um arquivo JSON com todos os dados" style={{background:Z.cd2,color:Z.tx2,border:`1px solid ${Z.bd}`,borderRadius:6,padding:"6px 9px",fontSize:10,cursor:"pointer"}}>Backup</button>}
         {canEdit&&<button onClick={()=>setSf(true)} style={{background:`linear-gradient(135deg,${Z.ac3},${Z.ac2})`,color:"#fff",border:"none",borderRadius:6,padding:"6px 12px",fontSize:11,fontWeight:600,cursor:"pointer",display:"flex",alignItems:"center",gap:4}}>+ Nova Compra</button>}
-        {P.exportar&&<button onClick={()=>exportXLSX(ps,baixas,ppl,mt)} style={{background:Z.cd2,color:Z.tx2,border:`1px solid ${Z.bd}`,borderRadius:6,padding:"6px 9px",fontSize:10,cursor:"pointer"}}>Exportar</button>}
+        {P.exportar&&<button onClick={()=>exportXLSX(psA,bxA,ppl,mt)} style={{background:Z.cd2,color:Z.tx2,border:`1px solid ${Z.bd}`,borderRadius:6,padding:"6px 9px",fontSize:10,cursor:"pointer"}}>Exportar</button>}
         <button onClick={handleLogout} style={{background:Z.cd2,color:Z.tx3,border:`1px solid ${Z.bd}`,borderRadius:6,padding:"6px 9px",fontSize:10,cursor:"pointer"}}>Sair</button>
       </div>
     </header>
@@ -984,15 +996,15 @@ function App(){
       <span>Última atualização: <span style={{color:Z.ac,fontFamily:Z.mn}}>{lastUpdate?new Date(lastUpdate).toLocaleString("pt-BR",{timeZone:TZ,day:"2-digit",month:"2-digit",year:"numeric",hour:"2-digit",minute:"2-digit"}):"—"}</span></span>
     </div>
 
-    <HistCtx.Provider value={history}><main style={{padding:18,maxWidth:1100,margin:"0 auto",animation:"fi .25s ease"}}>
-      {tab==="dashboard"&&<Dash {...{mt,sm,setSm,cmp,td,ap,am,ps,baixas,setBaixas,ajustes,setAjustes,setIncOk}} isAdmin={canEdit} canAj={!!P.inconsistencias}/>}
-      {tab==="purchases"&&<Purch {...{ps,setPs,sr,setSr,setEp}} isAdmin={canEdit}/>}
-      {tab==="baixas"&&<BaixasView {...{baixas,setBaixas,mt,am}} isAdmin={canEdit}/>}
+    <HistCtx.Provider value={histVis}><main style={{padding:18,maxWidth:1100,margin:"0 auto",animation:"fi .25s ease"}}>
+      {tab==="dashboard"&&<Dash {...{mt,sm,setSm,cmp,td,ap,am,ps:psA,baixas,setBaixas,ajustes,setAjustes,setIncOk,user}} adm={isAdmin} isAdmin={canEdit} canAj={!!P.inconsistencias}/>}
+      {tab==="purchases"&&<Purch {...{ps,setPs,sr,setSr,setEp,user}} adm={isAdmin} isAdmin={canEdit}/>}
+      {tab==="baixas"&&<BaixasView {...{baixas,setBaixas,mt,am,user}} adm={isAdmin} isAdmin={canEdit}/>}
       {/*tab==="people"&&<Ppl ppl={ppl} setPpl={setPpl} isAdmin={isAdmin}/>*/}
-      {tab==="reports"&&<Rpts {...{ps,mt,am}}/>}
-      {tab==="relatorios"&&<Relat {...{ps,baixas,mt,am,incOk,ajustes,history}} isAdmin={!!P.inconsistencias} admin={isAdmin}/>}
-      {tab==="incons"&&P.inconsistencias&&<Incons {...{ps,baixas,incOk,setIncOk,user,ajustes,setAjustes,am}}/>}
-      {tab==="history"&&<Hist history={history} canExport={!!P.exportar} canPrint={isAdmin}/>}
+      {tab==="reports"&&<Rpts {...{ps:psA,mt,am}}/>}
+      {tab==="relatorios"&&<Relat {...{ps:psA,baixas:bxA,mt,am,incOk,ajustes,history:histVis}} isAdmin={!!P.inconsistencias} admin={isAdmin}/>}
+      {tab==="incons"&&P.inconsistencias&&<Incons {...{ps:psA,baixas:bxA,incOk,setIncOk,user,ajustes,setAjustes,am}}/>}
+      {tab==="history"&&<Hist history={histVis} canExport={!!P.exportar} canPrint={isAdmin}/>}
       {tab==="usuarios"&&P.usuarios&&<Usuarios user={user}/>}
       {tab==="correcoes"&&isAdmin&&<Correcoes list={corrList} {...{ps,baixas,setPs,setBaixas,corr,setCorr,user,tt}}/>}
     </main></HistCtx.Provider>
@@ -1005,7 +1017,17 @@ function App(){
 
 function St({label,value,sub,color=Z.ac}){return(<div style={{background:Z.cd,border:`1px solid ${Z.bd}`,borderRadius:10,padding:"14px 16px",flex:"1 1 170px",minWidth:150}}><div style={{fontSize:9,color:Z.tx3,fontWeight:500,textTransform:"uppercase",letterSpacing:".07em"}}>{label}</div><div style={{fontSize:18,fontWeight:700,color,marginTop:5,fontFamily:Z.mn}}>{value}</div>{sub&&<div style={{fontSize:9,color:Z.tx3,marginTop:2}}>{sub}</div>}</div>);}
 
-function Dash({mt,sm,setSm,cmp,td,ap,am,ps,baixas,setBaixas,isAdmin,ajustes,setAjustes,setIncOk,canAj}){
+// ações de uma baixa: cancelar (quem edita), reativar e excluir (só administrador)
+function BxAcoes({b,m,i,setBaixas,podeEditar,adm,user}){
+  const set=f=>setBaixas(prev=>{const u={...prev};const l=[...(u[m]||[])];f(l);u[m]=l;return u;});const cx=!ativo(b);
+  const bt=c=>({background:"none",border:"none",color:c,fontSize:11,cursor:"pointer",padding:"2px 4px"});
+  return(<span style={{whiteSpace:"nowrap"}}>
+    {podeEditar&&!cx&&<button title="Cancelar baixa" onClick={e=>{e.stopPropagation();const n=cancelar(b,user?.email,"esta baixa");if(n)set(l=>{l[i]=n;});}} style={bt(Z.yl)}>⊘</button>}
+    {adm&&cx&&<button title="Reativar baixa" onClick={e=>{e.stopPropagation();if(confirm("Reativar esta baixa? Ela volta a entrar nos valores."))set(l=>{l[i]=reativar(l[i]);});}} style={bt(Z.gn)}>↺</button>}
+    {adm&&<button title="Excluir baixa" onClick={e=>{e.stopPropagation();if(confirm("Excluir definitivamente esta baixa? Ela some das telas e fica só no histórico (visível só para o administrador)."))set(l=>{l.splice(i,1);});}} style={bt(Z.rd)}>✕</button>}
+  </span>);
+}
+function Dash({mt,sm,setSm,cmp,td,ap,am,ps,baixas,setBaixas,isAdmin,adm,user,ajustes,setAjustes,setIncOk,canAj}){
   const[selLoja,setSelLoja]=useState(null);
   const[showAddBx,setShowAddBx]=useState(false);const[showPrint,setShowPrint]=useState(false);
   const[bxAmt,setBxAmt]=useState("");
@@ -1019,14 +1041,14 @@ function Dash({mt,sm,setSm,cmp,td,ap,am,ps,baixas,setBaixas,isAdmin,ajustes,setA
 
   // Baixas do mês selecionado
   const mBaixas=(baixas[sm]||[]);
-  const totalBaixas=mBaixas.reduce((s,b)=>s+b.amount,0);
+  const totalBaixas=mBaixas.filter(ativo).reduce((s,b)=>s+b.amount,0);
   // Saldo Mês Acumulado (igual à planilha)
   const calcAcumDash=(targetM)=>{
     if(SEED_ACUM[targetM]!==undefined)return SEED_ACUM[targetM];
     const lsi=MO.indexOf("Fevereiro/2026");const ti=MO.indexOf(targetM);
     if(ti<=lsi)return 0;
     let a=SEED_ACUM["Fevereiro/2026"]||0;
-    for(let i=lsi+1;i<=ti;i++){const m=MO[i];if(!m)break;const p=mt[m]||0;const tb=(baixas[m]||[]).reduce((s,b)=>s+b.amount,0);a+=(tb-p);}
+    for(let i=lsi+1;i<=ti;i++){const m=MO[i];if(!m)break;const p=mt[m]||0;const tb=(baixas[m]||[]).filter(ativo).reduce((s,b)=>s+b.amount,0);a+=(tb-p);}
     return Math.round(a*100)/100;
   };
   const saldoMesAcum=calcAcumDash(sm);
@@ -1054,10 +1076,10 @@ function Dash({mt,sm,setSm,cmp,td,ap,am,ps,baixas,setBaixas,isAdmin,ajustes,setA
 
   return(<div>
     <div style={{display:"flex",alignItems:"center",gap:8,marginBottom:18}}><select value={sm} onChange={e=>{setSm(e.target.value);setSelLoja(null);setShowAddBx(false);}} style={{background:Z.cd,color:Z.tx,border:`1px solid ${Z.bd}`,borderRadius:6,padding:"6px 9px",fontSize:12,fontWeight:500,cursor:"pointer",fontFamily:Z.ft}}>{[...am].reverse().map(m=><option key={m} value={m}>{m}</option>)}</select><button onClick={()=>setShowPrint(true)} style={{background:Z.cd,color:Z.tx2,border:`1px solid ${Z.bd}`,borderRadius:6,padding:"6px 12px",fontSize:11,cursor:"pointer",fontFamily:Z.ft}}>🖨 Imprimir</button></div>
-    {showPrint&&<PrintMonth {...{sm,ps,baixas,mt,ajustes}} onClose={()=>setShowPrint(false)}/>}
+    {showPrint&&<PrintMonth {...{sm,ps,baixas:bxAtivas(baixas),mt,ajustes}} onClose={()=>setShowPrint(false)}/>}
     <div className="stat-row" style={{display:"flex",gap:10,flexWrap:"wrap",marginBottom:18}}>
       <St label="Fatura do Mês" value={fB(c)} sub={df!==0?`${df>0?"▲":"▼"} ${Math.abs(df).toFixed(1)}%`:null} color={Z.ac}/>
-      <St label="Baixas do Mês" value={fB(totalBaixas)} sub={`${mBaixas.length} pagamento${mBaixas.length!==1?"s":""}`} color={Z.gn}/>
+      <St label="Baixas do Mês" value={fB(totalBaixas)} sub={`${mBaixas.filter(ativo).length} pagamento${mBaixas.filter(ativo).length!==1?"s":""}${mBaixas.some(b=>!ativo(b))?` · ${mBaixas.filter(b=>!ativo(b)).length} cancelada(s)`:""}`} color={Z.gn}/>
       <St label="Saldo Mês Acum." value={fB(saldoMesAcum)} sub={saldoMesAcum>=0?"Quitado":"Devedor"} color={saldoMesAcum>=0?Z.gn:Z.rd}/>
       <St label="Dívida Total" value={fB(td)} sub="parcelas futuras" color={Z.yl}/>
     </div>
@@ -1073,12 +1095,12 @@ function Dash({mt,sm,setSm,cmp,td,ap,am,ps,baixas,setBaixas,isAdmin,ajustes,setA
         </div>
       </div>
       {mBaixas.length>0&&(<table style={{width:"100%",fontSize:10,borderCollapse:"collapse",marginBottom:8}}>
-        <thead><tr style={{color:Z.tx3}}><th style={{textAlign:"left",padding:"4px 0",fontWeight:500}}>#</th><th style={{textAlign:"right",padding:"4px 0",fontWeight:500}}>Valor</th><th style={{textAlign:"right",padding:"4px 0",fontWeight:500}}>Data</th><th style={{textAlign:"center",padding:"4px 0",fontWeight:500,width:30}}></th></tr></thead>
+        <thead><tr style={{color:Z.tx3}}><th style={{textAlign:"left",padding:"4px 0",fontWeight:500}}>#</th><th style={{textAlign:"right",padding:"4px 0",fontWeight:500}}>Valor</th><th style={{textAlign:"right",padding:"4px 0",fontWeight:500}}>Data</th><th style={{textAlign:"center",padding:"4px 0",fontWeight:500,width:50}}></th></tr></thead>
         <tbody>{mBaixas.map((b,i)=>(<tr key={i} style={{borderTop:`1px solid ${Z.bd}`}}>
           <td style={{padding:"4px 0",color:Z.tx3}}>{i+1}</td>
-          <td style={{padding:"4px 0",textAlign:"right",fontFamily:Z.mn,color:Z.gn}}>{fB(b.amount)}</td>
+          <td style={{padding:"4px 0",textAlign:"right",fontFamily:Z.mn,color:Z.gn,...(ativo(b)?{}:{color:Z.rd,textDecoration:"line-through"})}}>{fB(b.amount)}<SelCanc x={b}/></td>
           <td style={{padding:"4px 0",textAlign:"right",color:Z.tx3}}>{b.anexos?.length>0&&<span style={{marginRight:5}}><AnexoChips ids={b.anexos} small/></span>}{fD(b.date)}<TxHist small anexos={b.anexos} keys={[`b:${sm}|${b.date}|${b.amount}`]} textos={[`em ${sm}: ${fB(b.amount)} (${fD(b.date)})`]} titulo={`Baixa da fatura de ${sm}: ${fB(b.amount)} paga em ${fD(b.date)}`}/></td>
-          <td style={{padding:"4px 0",textAlign:"center"}}>{isAdmin&&<button onClick={()=>removeBaixa(i)} style={{background:"none",border:"none",color:Z.rd,fontSize:10,cursor:"pointer",padding:"2px 4px"}}>✕</button>}</td>
+          <td style={{padding:"4px 0",textAlign:"center"}}><BxAcoes {...{b,m:sm,i,setBaixas,adm,user}} podeEditar={isAdmin}/></td>
         </tr>))}</tbody>
       </table>)}
       {isAdmin&&(showAddBx?(<div style={{padding:10,background:Z.cd2,borderRadius:8,border:`1px solid ${Z.bd2}`,animation:"fi .15s ease"}}>
@@ -1147,7 +1169,7 @@ function Dash({mt,sm,setSm,cmp,td,ap,am,ps,baixas,setBaixas,isAdmin,ajustes,setA
   </div>);
 }
 
-function Purch({ps,setPs,sr,setSr,setEp,isAdmin}){
+function Purch({ps,setPs,sr,setSr,setEp,isAdmin,adm,user}){
   const[so,setSo]=useState("date-desc");const[fl,setFl]=useState("");const[ex,setEx]=useState(null);const[status,setStatus]=useState("ativas");const[filterMonth,setFilterMonth]=useState("");
   const curIdx=MO.indexOf(cmk());
   const ls=useMemo(()=>[...new Set(ps.map(p=>p.loja))].sort(),[ps]);
@@ -1155,7 +1177,8 @@ function Purch({ps,setPs,sr,setSr,setEp,isAdmin}){
 
   const fd=useMemo(()=>{let l=[...ps];
     // Status filter
-    if(status==="ativas")l=l.filter(p=>{const mk=Object.keys(p.monthly);return mk.some(m=>MO.indexOf(m)>=curIdx);});
+    if(status==="canceladas")l=l.filter(p=>!ativo(p));
+    else if(status==="ativas")l=l.filter(p=>{const mk=Object.keys(p.monthly);return mk.some(m=>MO.indexOf(m)>=curIdx);});
     else if(status==="concluidas")l=l.filter(p=>{const mk=Object.keys(p.monthly);return mk.length>0&&!mk.some(m=>MO.indexOf(m)>=curIdx);});
     // Month filter
     if(filterMonth)l=l.filter(p=>p.monthly[filterMonth]>0);
@@ -1175,6 +1198,7 @@ function Purch({ps,setPs,sr,setSr,setEp,isAdmin}){
       <button onClick={()=>setStatus("ativas")} style={tabStyle(status==="ativas")}>Ativas</button>
       <button onClick={()=>setStatus("concluidas")} style={tabStyle(status==="concluidas")}>Concluídas</button>
       <button onClick={()=>setStatus("todas")} style={tabStyle(status==="todas")}>Todas</button>
+      {ps.some(p=>!ativo(p))&&<button onClick={()=>setStatus("canceladas")} style={tabStyle(status==="canceladas")}>Canceladas ({ps.filter(p=>!ativo(p)).length})</button>}
     </div>
     <div style={{display:"flex",gap:8,marginBottom:14,flexWrap:"wrap"}}>
       <div style={{position:"relative",flex:"1 1 120px"}}><span style={{position:"absolute",left:8,top:"50%",transform:"translateY(-50%)",color:Z.tx3,fontSize:13}}>🔍</span><input value={sr} onChange={e=>setSr(e.target.value)} placeholder="Buscar loja..." style={is}/></div>
@@ -1182,14 +1206,15 @@ function Purch({ps,setPs,sr,setSr,setEp,isAdmin}){
       <select value={filterMonth} onChange={e=>setFilterMonth(e.target.value)} style={ss}><option value="">Todos os meses</option>{[...allMonths].reverse().map(m=><option key={m} value={m}>{m}</option>)}</select>
       <select value={so} onChange={e=>setSo(e.target.value)} style={ss}><option value="date-desc">Recentes</option><option value="date-asc">Antigas</option><option value="total-desc">Maior valor</option><option value="total-asc">Menor valor</option></select>
     </div>
-    <div style={{fontSize:10,color:Z.tx3,marginBottom:8}}>{fd.length} compras {status==="concluidas"?"concluídas":status==="ativas"?"ativas":"total"} — Total: <span style={{color:Z.ac,fontFamily:Z.mn}}>{fB(fd.reduce((s,p)=>s+p.total,0))}</span></div>
+    <div style={{fontSize:10,color:Z.tx3,marginBottom:8}}>{fd.length} compras {status==="concluidas"?"concluídas":status==="ativas"?"ativas":status==="canceladas"?"canceladas":"total"} — Total: <span style={{color:Z.ac,fontFamily:Z.mn}}>{fB(fd.filter(ativo).reduce((s,p)=>s+p.total,0))}</span>{fd.some(p=>!ativo(p))&&<span> (sem as {fd.filter(p=>!ativo(p)).length} canceladas)</span>}</div>
     <div style={{display:"flex",flexDirection:"column",gap:5}}>{fd.map(p=>{const mk=Object.keys(p.monthly);const futureMonths=mk.filter(m=>MO.indexOf(m)>=curIdx);const pastCount=mk.filter(m=>MO.indexOf(m)<curIdx).length;const isCompleted=futureMonths.length===0&&mk.length>0;const curParc=isCompleted?p.parcelas:Math.min(pastCount+1,p.parcelas);const pr=p.parcelas>0?Math.min((mk.length/p.parcelas)*100,100):0;const paidVal=mk.filter(m=>MO.indexOf(m)<curIdx).reduce((s,m)=>s+(p.monthly[m]||0),0);const prVal=p.total>0?Math.min((paidVal/p.total)*100,100):0;const ie=ex===p.id;
-    return(<div key={p.id} style={{background:Z.cd,border:`1px solid ${Z.bd}`,borderRadius:8,overflow:"hidden"}}>
+    const cx=!ativo(p);const risc=cx?{color:Z.rd,textDecoration:"line-through"}:{};
+    return(<div key={p.id} style={{background:Z.cd,border:`1px solid ${cx?Z.rd+"80":Z.bd}`,borderRadius:8,overflow:"hidden",opacity:cx?.85:1}}>
       <div onClick={()=>setEx(ie?null:p.id)} style={{padding:"11px 12px",cursor:"pointer",display:"flex",alignItems:"center",gap:9}}>
         <div style={{width:34,height:34,borderRadius:7,background:Z.cd2,display:"flex",alignItems:"center",justifyContent:"center",fontSize:12,fontWeight:700,color:"#818cf8",flexShrink:0}}>{p.loja.charAt(0)}</div>
         <div style={{flex:1,minWidth:0}}>
-          <div style={{display:"flex",justifyContent:"space-between",alignItems:"baseline"}}><span style={{fontSize:12,fontWeight:600}}>{p.loja}</span><span style={{fontSize:12,fontWeight:700,fontFamily:Z.mn,color:Z.ac}}>{fB(p.total)}</span></div>
-          <div style={{display:"flex",justifyContent:"space-between",marginTop:2}}><span style={{fontSize:9,color:Z.tx3}}>{fD(p.data)} · {fB(p.total/p.parcelas)}/mês</span><span style={{fontSize:9,color:isCompleted?Z.gn:pr>=100?Z.gn:Z.yl,fontWeight:600}}>{isCompleted?`${p.parcelas}/${p.parcelas} ✓`:`${curParc}/${p.parcelas}`}</span></div>
+          <div style={{display:"flex",justifyContent:"space-between",alignItems:"baseline"}}><span style={{fontSize:12,fontWeight:600}}><span style={risc}>{p.loja}</span><SelCanc x={p}/></span><span style={{fontSize:12,fontWeight:700,fontFamily:Z.mn,color:Z.ac,...risc}}>{fB(p.total)}</span></div>
+          <div style={{display:"flex",justifyContent:"space-between",marginTop:2}}><span style={{fontSize:9,color:Z.tx3,...risc}}>{fD(p.data)} · {fB(p.total/p.parcelas)}/mês</span><span style={{fontSize:9,color:isCompleted?Z.gn:pr>=100?Z.gn:Z.yl,fontWeight:600}}>{isCompleted?`${p.parcelas}/${p.parcelas} ✓`:`${curParc}/${p.parcelas}`}</span></div>
           <div style={{display:"flex",gap:2,marginTop:5}}>
             {Array.from({length:p.parcelas},(_,idx)=>{const paid=idx<pastCount;const current=idx===pastCount;return(<div key={idx} style={{flex:1,height:4,borderRadius:2,background:paid?Z.gn:current?Z.ac2:Z.bd,transition:"background .3s"}}/>);})}
           </div>
@@ -1206,10 +1231,10 @@ function Purch({ps,setPs,sr,setSr,setEp,isAdmin}){
         {p.anexos?.length>0&&<div style={{margin:"8px 0 2px"}}><AnexoChips ids={p.anexos}/></div>}
         {<div style={{display:"flex",gap:5,margin:"8px 0 5px",justifyContent:"flex-end"}}>
           <span style={{marginRight:"auto"}}><TxHist anexos={p.anexos} keys={["c:"+p.id]} textos={[`${p.loja} (${fD(p.data)})`]} titulo={`Compra ${p.loja} (${fD(p.data)}) – ${fB(p.total)} em ${p.parcelas}x`}/></span>
-          {isAdmin&&<>
-          <button onClick={e=>{e.stopPropagation();setEp(p);}} style={{background:Z.bd,color:Z.ac,border:"none",borderRadius:4,padding:"4px 9px",fontSize:9,cursor:"pointer"}}>Editar</button>
-          <button onClick={e=>{e.stopPropagation();if(confirm("Excluir?"))setPs(v=>v.filter(x=>x.id!==p.id));}} style={{background:"#1a1015",color:Z.rd,border:"none",borderRadius:4,padding:"4px 9px",fontSize:9,cursor:"pointer"}}>Excluir</button>
-          </>}
+          {isAdmin&&!cx&&<button onClick={e=>{e.stopPropagation();setEp(p);}} style={{background:Z.bd,color:Z.ac,border:"none",borderRadius:4,padding:"4px 9px",fontSize:9,cursor:"pointer"}}>Editar</button>}
+          {isAdmin&&!cx&&<button onClick={e=>{e.stopPropagation();const n=cancelar(p,user?.email,"esta compra");if(n)setPs(v=>v.map(x=>x.id===p.id?n:x));}} style={{background:"#1a1015",color:Z.yl,border:"none",borderRadius:4,padding:"4px 9px",fontSize:9,cursor:"pointer"}}>Cancelar</button>}
+          {adm&&cx&&<button onClick={e=>{e.stopPropagation();if(confirm("Reativar esta compra? Ela volta a entrar nos valores."))setPs(v=>v.map(x=>x.id===p.id?reativar(x):x));}} style={{background:Z.bd,color:Z.gn,border:"none",borderRadius:4,padding:"4px 9px",fontSize:9,cursor:"pointer"}}>Reativar</button>}
+          {adm&&<button onClick={e=>{e.stopPropagation();if(confirm("Excluir definitivamente esta compra? Ela some das telas e fica só no histórico (visível só para o administrador)."))setPs(v=>v.filter(x=>x.id!==p.id));}} style={{background:"#1a1015",color:Z.rd,border:"none",borderRadius:4,padding:"4px 9px",fontSize:9,cursor:"pointer"}}>Excluir</button>}
         </div>}
         <table style={{width:"100%",fontSize:10,borderCollapse:"collapse"}}><thead><tr style={{color:Z.tx3}}><th style={{textAlign:"left",padding:"4px 0",fontWeight:500}}>Mês</th><th style={{textAlign:"right",padding:"4px 0",fontWeight:500}}>Valor</th><th style={{textAlign:"center",padding:"4px 0",fontWeight:500}}>Parcela</th></tr></thead><tbody>{(isCompleted?mk:futureMonths).map((m)=>{const allIdx=mk.indexOf(m);return(<tr key={m} style={{borderTop:`1px solid ${Z.bd}`,background:m===cmk()?`${Z.ac3}15`:"transparent"}}><td style={{padding:"4px 0",color:m===cmk()?Z.ac:Z.tx}}>{m}{m===cmk()?" ←":""}</td><td style={{padding:"4px 0",textAlign:"right",fontFamily:Z.mn,color:isCompleted?Z.gn:Z.ac}}>{fB(p.monthly[m])}</td><td style={{padding:"4px 0",textAlign:"center",color:Z.tx3,fontWeight:m===cmk()?600:400}}>{allIdx+1}/{p.parcelas}</td></tr>);})}</tbody></table>
       </div>)}
@@ -1525,7 +1550,7 @@ function Ppl({ppl,setPpl,isAdmin}){
   </div>);
 }
 
-function BaixasView({baixas,setBaixas,mt,am,isAdmin}){
+function BaixasView({baixas,setBaixas,mt,am,isAdmin,adm,user}){
   const[selM,setSelM]=useState(cmk());
   const[showAdd,setShowAdd]=useState(false);
   const[bAmt,setBAmt]=useState("");
@@ -1536,7 +1561,7 @@ function BaixasView({baixas,setBaixas,mt,am,isAdmin}){
   const[editDate,setEditDate]=useState("");
 
   const mBx=baixas[selM]||[];
-  const totalBx=mBx.reduce((s,b)=>s+b.amount,0);
+  const totalBx=mBx.filter(ativo).reduce((s,b)=>s+b.amount,0);
   const prov=mt[selM]||0;
   const saldoMes=totalBx-prov;
 
@@ -1553,7 +1578,7 @@ function BaixasView({baixas,setBaixas,mt,am,isAdmin}){
     for(let i=lsi+1;i<=ti;i++){
       const m=MO[i];if(!m)break;
       const p=mt[m]||0;
-      const tb=(baixas[m]||[]).reduce((s,b)=>s+b.amount,0);
+      const tb=(baixas[m]||[]).filter(ativo).reduce((s,b)=>s+b.amount,0);
       a+=(tb-p);
     }
     return Math.round(a*100)/100;
@@ -1589,7 +1614,7 @@ function BaixasView({baixas,setBaixas,mt,am,isAdmin}){
   return(<div>
     <div className="stat-row" style={{display:"flex",gap:10,flexWrap:"wrap",marginBottom:18}}>
       <St label="Provisão do Mês" value={fB(prov)} color={Z.ac}/>
-      <St label="Baixas do Mês" value={fB(totalBx)} sub={`${mBx.length} pagamento${mBx.length!==1?"s":""}`} color={Z.gn}/>
+      <St label="Baixas do Mês" value={fB(totalBx)} sub={`${mBx.filter(ativo).length} pagamento${mBx.filter(ativo).length!==1?"s":""}${mBx.some(b=>!ativo(b))?` · ${mBx.filter(b=>!ativo(b)).length} cancelada(s)`:""}`} color={Z.gn}/>
       <St label="Saldo do Mês" value={fB(saldoMes)} sub={saldoMes>=0?"Superávit":"Déficit"} color={saldoMes>=0?Z.gn:Z.yl}/>
       <St label="Saldo Acumulado" value={fB(saldoAcum)} sub={saldoAcum>=0?"Quitado":"Devedor"} color={saldoAcum>=0?Z.gn:Z.rd}/>
     </div>
@@ -1631,11 +1656,11 @@ function BaixasView({baixas,setBaixas,mt,am,isAdmin}){
           <td style={{padding:"4px 0",textAlign:"right"}}><div style={{position:"relative",display:"inline-block"}}><span style={{position:"absolute",left:4,top:"50%",transform:"translateY(-50%)",fontSize:9,color:Z.tx3}}>R$</span><input value={editAmt} onChange={e=>setEditAmt(maskMoney(e.target.value))} inputMode="decimal" style={{background:Z.cd2,border:`1px solid ${Z.bd}`,borderRadius:4,padding:"4px 4px 4px 22px",color:Z.tx,fontSize:10,width:100,fontFamily:Z.mn,boxSizing:"border-box"}}/></div></td>
           <td style={{padding:"4px 0",textAlign:"right"}}><input value={editDate} onChange={e=>setEditDate(maskDate(e.target.value))} maxLength={10} inputMode="numeric" placeholder="dd/MM/aaaa" style={{background:Z.cd2,border:`1px solid ${Z.bd}`,borderRadius:4,padding:"4px 6px",color:Z.tx,fontSize:10,width:90,textAlign:"right",boxSizing:"border-box"}}/></td>
           <td style={{padding:"4px 0",textAlign:"center",whiteSpace:"nowrap"}}><button onClick={saveEdit} style={{background:Z.gn,color:"#fff",border:"none",borderRadius:3,padding:"3px 6px",fontSize:9,cursor:"pointer",marginRight:2}}>✓</button><button onClick={cancelEdit} style={{background:Z.bd,color:Z.tx3,border:"none",borderRadius:3,padding:"3px 6px",fontSize:9,cursor:"pointer"}}>✕</button></td>
-        </tr>):(<tr key={i} style={{borderTop:`1px solid ${Z.bd}`,cursor:isAdmin?"pointer":"default"}} onDoubleClick={()=>isAdmin&&startEdit(i)}>
+        </tr>):(<tr key={i} style={{borderTop:`1px solid ${Z.bd}`,cursor:isAdmin?"pointer":"default"}} onDoubleClick={()=>isAdmin&&ativo(b)&&startEdit(i)}>
           <td style={{padding:"6px 0",color:Z.tx3}}>{i+1}</td>
-          <td style={{padding:"6px 0",textAlign:"right",fontFamily:Z.mn,color:Z.gn,fontWeight:600}}>{fB(b.amount)}</td>
+          <td style={{padding:"6px 0",textAlign:"right",fontFamily:Z.mn,color:Z.gn,fontWeight:600,...(ativo(b)?{}:{color:Z.rd,textDecoration:"line-through"})}}>{fB(b.amount)}<SelCanc x={b}/></td>
           <td style={{padding:"6px 0",textAlign:"right",color:Z.tx3}}>{b.anexos?.length>0&&<span style={{marginRight:5}}><AnexoChips ids={b.anexos} small/></span>}{b.date?fD(b.date):"—"}<TxHist small anexos={b.anexos} keys={[`b:${selM}|${b.date}|${b.amount}`]} textos={[`em ${selM}: ${fB(b.amount)} (${fD(b.date)})`]} titulo={`Baixa da fatura de ${selM}: ${fB(b.amount)} paga em ${fD(b.date)}`}/></td>
-          <td style={{padding:"6px 0",textAlign:"center"}}>{isAdmin&&<button onClick={()=>remBx(i)} style={{background:"none",border:"none",color:Z.rd,fontSize:11,cursor:"pointer",padding:"2px 4px"}}>✕</button>}</td>
+          <td style={{padding:"6px 0",textAlign:"center"}}><BxAcoes {...{b,m:selM,i,setBaixas,adm,user}} podeEditar={isAdmin}/></td>
         </tr>))}</tbody>
         <tfoot><tr style={{borderTop:`2px solid ${Z.bd2}`}}>
           <td style={{padding:"8px 0",fontWeight:600,color:Z.tx3}}>Total</td>
@@ -1661,7 +1686,7 @@ function BaixasView({baixas,setBaixas,mt,am,isAdmin}){
           <tbody>{(()=>{
             return allBxMonths.map(m=>{
               const p=mt[m]||0;
-              const bxList=baixas[m]||[];
+              const bxList=(baixas[m]||[]).filter(ativo);
               const tb=bxList.reduce((s,b)=>s+b.amount,0);
               const sl=tb-p;
               const slAcum=calcAcum(m);

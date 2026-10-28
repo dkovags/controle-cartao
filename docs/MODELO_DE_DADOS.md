@@ -49,11 +49,19 @@ erDiagram
         int parcelas
         map monthly "{ 'Mês/AAAA': valor da parcela }"
         array anexos "ids de ANEXO (opcional)"
+        string status "cancelada (opcional; ausente = ativa)"
+        string motivo "motivo do cancelamento (opcional)"
+        string canceladoPor "e-mail"
+        string canceladoEm "ISO 8601"
     }
     BAIXA {
         number amount "valor pago"
         string date "data do pagamento dd/mm/aaaa"
         array anexos "ids de ANEXO (opcional)"
+        string status "cancelada (opcional; ausente = ativa)"
+        string motivo "motivo do cancelamento (opcional)"
+        string canceladoPor "e-mail"
+        string canceladoEm "ISO 8601"
     }
     TERCEIRO {
         string item
@@ -141,6 +149,16 @@ Os campos são gravados como texto JSON por compatibilidade com a versão origin
 - `monthly` usa como chave o **mês da fatura** (competência = mês do pagamento), no formato `Mês/AAAA` com o nome do mês em português.
 - Regra de lançamento: compra feita até o dia 18 cai na fatura do próprio mês; a partir do dia 19 (fechamento), na do mês seguinte.
 - Compra com entrada (ex.: Iphone) tem um mês a mais que `parcelas`, com o primeiro valor diferente dos demais.
+
+### Cancelamento e exclusão (compras e baixas)
+
+- **Cancelada** (`status: "cancelada"`, com `motivo`, `canceladoPor`, `canceladoEm`): quem tem a permissão
+  de editar (perfil Edição ou Administrador) pode cancelar. O registro continua gravado e visível
+  (vermelho e riscado, com histórico e comprovantes), mas fica fora de todos os valores: fatura, dívida,
+  saldos, gráficos, relatórios, exportação e inconsistências. Só o administrador reativa.
+- **Excluída**: só o administrador exclui. O registro sai dos dados e fica apenas no histórico
+  ("Compra excluída…", "Baixa excluída…"); essas linhas do histórico só aparecem para o administrador.
+  Os comprovantes continuam na subcoleção `anexos`.
 
 ### Baixa (pagamento)
 
