@@ -803,13 +803,13 @@ function RelAlt({history,card,sel,btn}){
   </div>);
 }
 // botão 🕘 de um registro (compra ou baixa): abre só as alterações dele
-function TxHist({keys,textos,titulo,small}){
+function TxHist({keys,textos,titulo,small,anexos}){
   const history=useContext(HistCtx);const[open,setOpen]=useState(false);
   const linhas=open?hDoRegistro(history,keys,textos):[];
   return(<>{<button title="Histórico deste registro" onClick={e=>{e.stopPropagation();setOpen(true);}} style={{background:small?"none":Z.bd,color:Z.tx2,border:"none",borderRadius:4,padding:small?"0 3px":"4px 9px",fontSize:small?11:9,cursor:"pointer",fontFamily:Z.ft}}>🕘{small?"":" Histórico"}</button>}
     {open&&ReactDOM.createPortal(<div onClick={()=>setOpen(false)} style={{position:"fixed",inset:0,background:"rgba(0,0,0,.75)",zIndex:350,display:"flex",alignItems:"center",justifyContent:"center",padding:14,fontFamily:Z.ft}}>
       <div onClick={e=>e.stopPropagation()} style={{background:Z.cd,border:`1px solid ${Z.bd2}`,borderRadius:10,padding:14,width:"100%",maxWidth:560,maxHeight:"85vh",overflowY:"auto"}}>
-        <div style={{display:"flex",justifyContent:"space-between",gap:8,alignItems:"flex-start",marginBottom:8}}><div><div style={{fontSize:12,fontWeight:600,color:Z.ac}}>Histórico do registro</div><div style={{fontSize:11,color:Z.tx2}}>{titulo}</div></div>
+        <div style={{display:"flex",justifyContent:"space-between",gap:8,alignItems:"flex-start",marginBottom:8}}><div><div style={{fontSize:12,fontWeight:600,color:Z.ac}}>Histórico do registro</div><div style={{fontSize:11,color:Z.tx2}}>{titulo}</div>{anexos?.length>0&&<div style={{marginTop:6}}><AnexoChips ids={anexos}/></div>}</div>
           <button onClick={()=>setOpen(false)} style={{background:Z.cd2,color:Z.tx,border:`1px solid ${Z.bd}`,borderRadius:6,padding:"5px 10px",fontSize:11,cursor:"pointer"}}>Fechar</button></div>
         {linhas.length?<HistTabela linhas={linhas}/>:<div style={{fontSize:11,color:Z.tx3,padding:"8px 0"}}>Nenhuma alteração registrada para este registro. O histórico começou em 15/10/2026; lançamentos anteriores a essa data não têm registro.</div>}
       </div></div>,document.body)}</>);
@@ -1074,7 +1074,7 @@ function Dash({mt,sm,setSm,cmp,td,ap,am,ps,baixas,setBaixas,isAdmin,ajustes,setA
         <tbody>{mBaixas.map((b,i)=>(<tr key={i} style={{borderTop:`1px solid ${Z.bd}`}}>
           <td style={{padding:"4px 0",color:Z.tx3}}>{i+1}</td>
           <td style={{padding:"4px 0",textAlign:"right",fontFamily:Z.mn,color:Z.gn}}>{fB(b.amount)}</td>
-          <td style={{padding:"4px 0",textAlign:"right",color:Z.tx3}}>{b.anexos?.length>0&&<span style={{marginRight:5}}><AnexoChips ids={b.anexos} small/></span>}{fD(b.date)}<TxHist small keys={[`b:${sm}|${b.date}|${b.amount}`]} textos={[`em ${sm}: ${fB(b.amount)} (${fD(b.date)})`]} titulo={`Baixa da fatura de ${sm}: ${fB(b.amount)} paga em ${fD(b.date)}`}/></td>
+          <td style={{padding:"4px 0",textAlign:"right",color:Z.tx3}}>{b.anexos?.length>0&&<span style={{marginRight:5}}><AnexoChips ids={b.anexos} small/></span>}{fD(b.date)}<TxHist small anexos={b.anexos} keys={[`b:${sm}|${b.date}|${b.amount}`]} textos={[`em ${sm}: ${fB(b.amount)} (${fD(b.date)})`]} titulo={`Baixa da fatura de ${sm}: ${fB(b.amount)} paga em ${fD(b.date)}`}/></td>
           <td style={{padding:"4px 0",textAlign:"center"}}>{isAdmin&&<button onClick={()=>removeBaixa(i)} style={{background:"none",border:"none",color:Z.rd,fontSize:10,cursor:"pointer",padding:"2px 4px"}}>✕</button>}</td>
         </tr>))}</tbody>
       </table>)}
@@ -1202,7 +1202,7 @@ function Purch({ps,setPs,sr,setSr,setEp,isAdmin}){
       {ie&&(<div style={{padding:"0 12px 10px",borderTop:`1px solid ${Z.bd}`,animation:"fi .15s ease"}}>
         {p.anexos?.length>0&&<div style={{margin:"8px 0 2px"}}><AnexoChips ids={p.anexos}/></div>}
         {<div style={{display:"flex",gap:5,margin:"8px 0 5px",justifyContent:"flex-end"}}>
-          <span style={{marginRight:"auto"}}><TxHist keys={["c:"+p.id]} textos={[`${p.loja} (${fD(p.data)})`]} titulo={`Compra ${p.loja} (${fD(p.data)}) – ${fB(p.total)} em ${p.parcelas}x`}/></span>
+          <span style={{marginRight:"auto"}}><TxHist anexos={p.anexos} keys={["c:"+p.id]} textos={[`${p.loja} (${fD(p.data)})`]} titulo={`Compra ${p.loja} (${fD(p.data)}) – ${fB(p.total)} em ${p.parcelas}x`}/></span>
           {isAdmin&&<>
           <button onClick={e=>{e.stopPropagation();setEp(p);}} style={{background:Z.bd,color:Z.ac,border:"none",borderRadius:4,padding:"4px 9px",fontSize:9,cursor:"pointer"}}>Editar</button>
           <button onClick={e=>{e.stopPropagation();if(confirm("Excluir?"))setPs(v=>v.filter(x=>x.id!==p.id));}} style={{background:"#1a1015",color:Z.rd,border:"none",borderRadius:4,padding:"4px 9px",fontSize:9,cursor:"pointer"}}>Excluir</button>
@@ -1631,7 +1631,7 @@ function BaixasView({baixas,setBaixas,mt,am,isAdmin}){
         </tr>):(<tr key={i} style={{borderTop:`1px solid ${Z.bd}`,cursor:isAdmin?"pointer":"default"}} onDoubleClick={()=>isAdmin&&startEdit(i)}>
           <td style={{padding:"6px 0",color:Z.tx3}}>{i+1}</td>
           <td style={{padding:"6px 0",textAlign:"right",fontFamily:Z.mn,color:Z.gn,fontWeight:600}}>{fB(b.amount)}</td>
-          <td style={{padding:"6px 0",textAlign:"right",color:Z.tx3}}>{b.anexos?.length>0&&<span style={{marginRight:5}}><AnexoChips ids={b.anexos} small/></span>}{b.date?fD(b.date):"—"}<TxHist small keys={[`b:${selM}|${b.date}|${b.amount}`]} textos={[`em ${selM}: ${fB(b.amount)} (${fD(b.date)})`]} titulo={`Baixa da fatura de ${selM}: ${fB(b.amount)} paga em ${fD(b.date)}`}/></td>
+          <td style={{padding:"6px 0",textAlign:"right",color:Z.tx3}}>{b.anexos?.length>0&&<span style={{marginRight:5}}><AnexoChips ids={b.anexos} small/></span>}{b.date?fD(b.date):"—"}<TxHist small anexos={b.anexos} keys={[`b:${selM}|${b.date}|${b.amount}`]} textos={[`em ${selM}: ${fB(b.amount)} (${fD(b.date)})`]} titulo={`Baixa da fatura de ${selM}: ${fB(b.amount)} paga em ${fD(b.date)}`}/></td>
           <td style={{padding:"6px 0",textAlign:"center"}}>{isAdmin&&<button onClick={()=>remBx(i)} style={{background:"none",border:"none",color:Z.rd,fontSize:11,cursor:"pointer",padding:"2px 4px"}}>✕</button>}</td>
         </tr>))}</tbody>
         <tfoot><tr style={{borderTop:`2px solid ${Z.bd2}`}}>
