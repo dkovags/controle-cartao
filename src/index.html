@@ -42,6 +42,12 @@ const ativo=x=>x?.status!=="cancelada";
 const cancelar=(x,who,oque)=>{const m=prompt(`Cancelar ${oque}? Ela deixa de entrar nos valores, mas continua visível (riscada), com histórico e comprovantes.\n\nMotivo (opcional):`,"");if(m===null)return null;return{...x,status:"cancelada",...(m.trim()?{motivo:m.trim()}:{}),canceladoPor:who||"",canceladoEm:new Date().toISOString()};};
 const reativar=x=>{const{status,motivo,canceladoPor,canceladoEm,...r}=x;return r;};
 const SelCanc=({x})=>x?.status==="cancelada"?<span title={`Cancelada em ${fmtTs(x.canceladoEm)} por ${x.canceladoPor}${x.motivo?" – "+x.motivo:""}`} style={{fontSize:8,fontWeight:700,color:"#fff",background:Z.rd,borderRadius:3,padding:"1px 5px",marginLeft:6,textDecoration:"none",display:"inline-block",verticalAlign:"middle"}}>CANCELADA</span>:null;
+// fatura a que um pagamento se refere: pago até o dia do vencimento vale para a fatura do próprio mês; depois, para a do mês seguinte
+const VENC_DIA=25;
+function faturaDoPgto(dt){if(!dt||!isValidDate(dt))return null;const[d,m,y]=dt.split("/").map(Number);let mm=m,yy=y;if(d>VENC_DIA){mm++;if(mm>12){mm=1;yy++;}}return`${MN[mm-1]}/${yy}`;}
+const escolheFatura=(dt,atual)=>{const s=faturaDoPgto(dt);if(!s||s===atual)return atual;return confirm(`Pela data do pagamento (${dt}), esta baixa é da fatura de ${s} (pagamentos até o dia ${VENC_DIA} valem para a fatura do mês; depois, para a do mês seguinte).\n\nOK: lançar na fatura de ${s}\nCancelar: lançar na fatura de ${atual}`)?s:atual;};
+function SugFatura({dt,atual,usar}){const s=faturaDoPgto(dt);
+  return(<div style={{fontSize:10,margin:"0 0 8px",color:Z.tx2}}>Fatura: <b style={{color:Z.ac}}>{atual}</b>{s&&s!==atual&&<span style={{color:Z.yl}}> · pela data do pagamento, a fatura sugerida é <b>{s}</b> <button type="button" onClick={()=>usar(s)} style={{background:Z.yl,color:"#111",border:"none",borderRadius:4,padding:"2px 8px",fontSize:10,fontWeight:700,cursor:"pointer",marginLeft:4}}>Usar {s}</button></span>}</div>);}
 const bxAtivas=bx=>Object.fromEntries(Object.entries(bx||{}).map(([m,l])=>[m,(l||[]).filter(ativo)]));
 function cmk(){const n=brHoje();return`${MN[n.m-1]}/${n.y}`;}
 function fB(v){if(v==null||isNaN(v))return"R$ 0,00";const n=Object.is(v,-0)||Math.abs(v)<0.005?0:v;return"R$ "+n.toLocaleString("pt-BR",{minimumFractionDigits:2,maximumFractionDigits:2});}
@@ -1061,8 +1067,9 @@ function Dash({mt,sm,setSm,cmp,td,ap,am,ps,baixas,setBaixas,isAdmin,adm,user,aju
     else if(!isValidDate(bxDate))e.date="Data inválida";
     setBxErr(e);
     if(Object.keys(e).length>0)return;
-    let anexos=null;if(bxFile){setBxBusy(true);try{anexos=[await saveAnexo(bxFile,currentUser(),{tipo:"baixa",mes:sm,data:bxDate})];}catch(er){setBxBusy(false);if(!salvarSemAnexo(er,"a baixa"))return;}setBxBusy(false);}
-    setBaixas(prev=>{const updated={...prev};const list=[...(updated[sm]||[]),{amount:amt,date:bxDate,...(anexos?{anexos}:{})}];updated[sm]=list;return updated;});
+    const mes=escolheFatura(bxDate,sm);
+    let anexos=null;if(bxFile){setBxBusy(true);try{anexos=[await saveAnexo(bxFile,currentUser(),{tipo:"baixa",mes,data:bxDate})];}catch(er){setBxBusy(false);if(!salvarSemAnexo(er,"a baixa"))return;}setBxBusy(false);}
+    setBaixas(prev=>{const updated={...prev};const list=[...(updated[mes]||[]),{amount:amt,date:bxDate,...(anexos?{anexos}:{})}];updated[mes]=list;return updated;});if(mes!==sm)setSm(mes);
     setBxAmt("");setBxDate("");setShowAddBx(false);setBxErr({});setBxFile(null);
   };
 
@@ -1105,6 +1112,7 @@ function Dash({mt,sm,setSm,cmp,td,ap,am,ps,baixas,setBaixas,isAdmin,adm,user,aju
       </table>)}
       {isAdmin&&(showAddBx?(<div style={{padding:10,background:Z.cd2,borderRadius:8,border:`1px solid ${Z.bd2}`,animation:"fi .15s ease"}}>
         <ScanButton kind="baixa" onFile={setBxFile} onResult={r=>{if(r.valor)setBxAmt(moneyTxt(r.valor));if(r.data)setBxDate(r.data);setBxErr({});}}/>
+        <SugFatura dt={bxDate} atual={sm} usar={setSm}/>
         <div className="g3f">
           <div><label style={{fontSize:8,color:Z.tx3,display:"block",marginBottom:1}}>Valor (R$)</label>
             <div style={{position:"relative"}}><span style={{position:"absolute",left:6,top:"50%",transform:"translateY(-50%)",fontSize:9,color:Z.tx3}}>R$</span><input value={bxAmt} onChange={e=>{setBxAmt(maskMoney(e.target.value));setBxErr(p=>({...p,amt:undefined}));}} placeholder="0,00" inputMode="decimal" style={{...(bxErr.amt?bxIe:bxIs),paddingLeft:22}}/></div>
@@ -1593,8 +1601,9 @@ function BaixasView({baixas,setBaixas,mt,am,isAdmin,adm,user}){
     else if(!isValidDate(bDate))e.date="Data inválida";
     setBErr(e);
     if(Object.keys(e).length>0)return;
-    let anexos=null;if(bFile){setBBusy(true);try{anexos=[await saveAnexo(bFile,currentUser(),{tipo:"baixa",mes:selM,data:bDate})];}catch(er){setBBusy(false);if(!salvarSemAnexo(er,"a baixa"))return;}setBBusy(false);}
-    setBaixas(prev=>{const u={...prev};u[selM]=[...(u[selM]||[]),{amount:amt,date:bDate,...(anexos?{anexos}:{})}];return u;});
+    const mes=escolheFatura(bDate,selM);
+    let anexos=null;if(bFile){setBBusy(true);try{anexos=[await saveAnexo(bFile,currentUser(),{tipo:"baixa",mes,data:bDate})];}catch(er){setBBusy(false);if(!salvarSemAnexo(er,"a baixa"))return;}setBBusy(false);}
+    setBaixas(prev=>{const u={...prev};u[mes]=[...(u[mes]||[]),{amount:amt,date:bDate,...(anexos?{anexos}:{})}];return u;});if(mes!==selM)setSelM(mes);
     setBAmt("");setBDate("");setShowAdd(false);setBErr({});setBFile(null);
   };
 
@@ -1632,6 +1641,7 @@ function BaixasView({baixas,setBaixas,mt,am,isAdmin,adm,user}){
       {isAdmin&&showAdd&&(<div style={{padding:12,background:Z.cd2,borderRadius:8,border:`1px solid ${Z.bd2}`,marginBottom:12,animation:"fi .15s ease"}}>
         <div style={{fontSize:10,fontWeight:600,color:Z.ac,marginBottom:8}}>Registrar Baixa — {selM}</div>
         <ScanButton kind="baixa" onFile={setBFile} onResult={r=>{if(r.valor)setBAmt(moneyTxt(r.valor));if(r.data)setBDate(r.data);setBErr({});}}/>
+        <SugFatura dt={bDate} atual={selM} usar={setSelM}/>
         <div className="g3f">
           <div><label style={{fontSize:9,color:Z.tx3,display:"block",marginBottom:2}}>Valor (R$)</label>
             <div style={{position:"relative"}}><span style={{position:"absolute",left:7,top:"50%",transform:"translateY(-50%)",fontSize:10,color:Z.tx3}}>R$</span><input value={bAmt} onChange={e=>{setBAmt(maskMoney(e.target.value));setBErr(p=>({...p,amt:undefined}));}} placeholder="0,00" inputMode="decimal" style={{...(bErr.amt?ie:is),paddingLeft:24}}/></div>
