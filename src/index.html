@@ -43,7 +43,7 @@ const cancelar=(x,who,oque)=>{const m=prompt(`Cancelar ${oque}? Ela deixa de ent
 const reativar=x=>{const{status,motivo,canceladoPor,canceladoEm,...r}=x;return r;};
 const SelCanc=({x})=>x?.status==="cancelada"?<span title={`Cancelada em ${fmtTs(x.canceladoEm)} por ${x.canceladoPor}${x.motivo?" – "+x.motivo:""}`} style={{fontSize:8,fontWeight:700,color:"#fff",background:Z.rd,borderRadius:3,padding:"1px 5px",marginLeft:6,textDecoration:"none",display:"inline-block",verticalAlign:"middle"}}>CANCELADA</span>:null;
 // fatura a que um pagamento se refere: pago até o dia do vencimento vale para a fatura do próprio mês; depois, para a do mês seguinte
-const VENC_DIA=20;
+const VENC_DIA=25;
 function faturaDoPgto(dt){if(!dt||!isValidDate(dt))return null;const[d,m,y]=dt.split("/").map(Number);let mm=m,yy=y;if(d>VENC_DIA){mm++;if(mm>12){mm=1;yy++;}}return`${MN[mm-1]}/${yy}`;}
 const escolheFatura=(dt,atual)=>{const s=faturaDoPgto(dt);if(!s||s===atual)return atual;return confirm(`Pela data do pagamento (${dt}), esta baixa é da fatura de ${s} (pagamentos até o dia ${VENC_DIA} valem para a fatura do mês; depois, para a do mês seguinte).\n\nOK: lançar na fatura de ${s}\nCancelar: lançar na fatura de ${atual}`)?s:atual;};
 function SugFatura({dt,atual,usar}){const s=faturaDoPgto(dt);
